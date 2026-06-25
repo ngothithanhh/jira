@@ -9,6 +9,8 @@ import com.example.jira.mapper.ProjectMapper;
 import com.example.jira.repository.ProjectRepository;
 import com.example.jira.repository.UserRepository;
 import com.example.jira.repository.UserRoleAssignmentRepository;
+import com.example.jira.security.GlobalSecurity;
+import com.example.jira.security.ProjectSecurity;
 import com.example.jira.service.AuthService;
 import com.example.jira.service.ProjectService;
 import com.example.jira.ultils.SecurityUtils;
@@ -22,17 +24,19 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ProjectServiceImpl implements ProjectService {
     private final ProjectRepository projectRepository;
-    private final AuthService authService;
     private final UserRepository userRepository;
     private final ProjectMapper projectMapper;
     private final UserRoleAssignmentRepository userRoleAssignmentRepository;
+    private final GlobalSecurity globalSecurity;
+    private final ProjectSecurity projectSecurity;
 
     @Override
     public ProjectSummary createProject(CreateProjectRequest request){
         int userId = SecurityUtils.getCurrentUserId();
         User user = userRepository.findById(userId).orElseThrow(()->new RuntimeException("Không tìm thấy người dùng!"));
 
-        //kiem tra vai tro global user co duoc phep tao du an moi khong
+        if(!globalSecurity.hasPermission("CREATE_PROJECT"))
+            throw new RuntimeException("Bạn không có quyền tạo dự án!");
 
         if(projectRepository.existsByProjectKey(request.getProjectKey())){
             throw new RuntimeException("Khóa dự án đã tồn tại!");
@@ -67,8 +71,8 @@ public class ProjectServiceImpl implements ProjectService {
     public ProjectSummary updateProject(int id, UpdateProjectRequest request){
         int userId = SecurityUtils.getCurrentUserId();
 
-        if(!userRoleAssignmentRepository.existsByUser_UserIdAndRole_RoleName(userId,"ADMIN_PROJECT"))
-            throw new RuntimeException("Không có quyền sửa dự án!");
+        if(!projectSecurity.hasPermission(id,"UPDATE_PROJECT"))
+            throw new RuntimeException("Bạn không có quyền sửa dự án!");
 
         Project project = projectRepository.findById(id).orElseThrow(()->new RuntimeException("Không tìm thấy dự án!"));
         project.setProjectName(request.getProjectName());
@@ -81,8 +85,8 @@ public class ProjectServiceImpl implements ProjectService {
     public void deleteProject(int id){
         int userId = SecurityUtils.getCurrentUserId();
 
-        if(!userRoleAssignmentRepository.existsByUser_UserIdAndRole_RoleName(userId,"ADMIN_PROJECT"))
-            throw new RuntimeException("Không có quyền xóa dự án!");
+        if(!globalSecurity.hasPermission("DELETE_PROJECT"))
+            throw new RuntimeException("Bạn không có quyền xóa dự án!");
 
         Project project = projectRepository.findById(id).orElseThrow(()->new RuntimeException("Không tìm thấy dự án!"));
         projectRepository.delete(project);
