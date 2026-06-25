@@ -3,7 +3,7 @@ package com.example.jira.service.impl;
 import com.example.jira.dto.auth.AuthResponseDTO;
 import com.example.jira.dto.auth.LoginRequestDTO;
 import com.example.jira.dto.auth.RegisterRequestDTO;
-import com.example.jira.dto.user.UserResponseDTO;
+import com.example.jira.dto.user.UserSummary;
 import com.example.jira.entity.RefreshToken;
 import com.example.jira.entity.User;
 import com.example.jira.repository.UserRepository;
@@ -13,6 +13,8 @@ import com.example.jira.service.RefreshTokenService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -30,18 +32,14 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public AuthResponseDTO login(LoginRequestDTO request){
-        authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(
-                        request.getEmail(),
-                        request.getPassword()
-                )
-        );
+        authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword()));
 
         User user = userRepository.findByEmail(request.getEmail()).orElseThrow();
 
         String token = jwtUtil.generateToken(request.getEmail());
         RefreshToken refreshToken = refreshTokenService.createRefreshToken(user);
 
+//        System.out.println(token+"\n");
         return new AuthResponseDTO(token, refreshToken.getTokenValue());
     }
 
@@ -91,11 +89,21 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public UserResponseDTO getCurrentUser(String email){
+    public UserSummary getCurrentUser(String email){
         User user = userRepository.findByEmail(email).orElseThrow(()->new RuntimeException("User not found"));
 
-        return new UserResponseDTO(user.getUserId(), user.getEmail(), user.getUserName());
+        return new UserSummary(user.getUserId(), user.getEmail(), user.getUserName());
 
+    }
+
+    @Override
+    public UserSummary getCurrentUser(){
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String email = authentication.getName();
+
+        User user = userRepository.findByEmail(email).orElseThrow(()->new RuntimeException("User not found"));
+
+        return new UserSummary(user.getUserId(), user.getEmail(), user.getUserName());
     }
 
 

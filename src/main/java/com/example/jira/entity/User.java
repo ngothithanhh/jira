@@ -62,4 +62,8 @@ public class User {
     @OneToMany(mappedBy = "user")
     private Set<AuditLog> auditLogs;
 
+    @OneToMany(mappedBy = "user", fetch = FetchType.EAGER) // Dùng EAGER để tự động join lấy Role khi get User
+    private Set<UserRoleAssignment> userRoleAssignments;
+
+
 }
