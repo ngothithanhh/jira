@@ -78,4 +78,20 @@ public class Issue {
 
     @OneToMany(mappedBy = "parentIssue")
     private List<Issue> subTasks;
+
+    @ManyToOne
+    @JoinColumn(name = "project_id")
+    private Project project;
+
+    @ManyToOne
+    @JoinColumn(name = "user_id")
+    private User reporter;
+
+    @ManyToOne
+    @JoinColumn(name = "user_id")
+    private User assignee;
+
+    @ManyToOne
+    @JoinColumn(name = "status_id")
+    private IssueStatus status;
 }
