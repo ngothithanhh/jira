@@ -49,4 +49,7 @@ public class Project {
 
     @OneToMany(mappedBy = "project")
     private Set<ProjectVersion> projectVersions;
+
+    @OneToMany(mappedBy = "project")
+    private Set<Issue> issues;
 }
