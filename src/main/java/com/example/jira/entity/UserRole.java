@@ -1,5 +1,6 @@
 package com.example.jira.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -22,12 +23,18 @@ public class UserRole {
     @Column(name = "role_name", unique = true, nullable = false, length = 50)
     private String roleName;
 
+    //global role assignment
     @OneToMany(mappedBy = "role")
+    @JsonIgnore
     private Set<UserRoleAssignment> userRoleAssignments;
 
+    //role permission
     @OneToMany(mappedBy = "role")
+    @JsonIgnore
     private Set<RolePermission> rolePermissions;
 
+    //role project
     @OneToMany(mappedBy = "role")
+    @JsonIgnore
     private Set<ProjectMember> projectMembers;
 }
