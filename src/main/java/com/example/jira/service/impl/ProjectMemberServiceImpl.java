@@ -5,6 +5,7 @@ import com.example.jira.dto.project.ProjectMemberResponse;
 import com.example.jira.entity.*;
 import com.example.jira.mapper.ProjectMemberMapper;
 import com.example.jira.repository.*;
+import com.example.jira.security.ProjectSecurity;
 import com.example.jira.service.ProjectMemberService;
 import com.example.jira.service.ProjectService;
 import com.example.jira.ultils.SecurityUtils;
@@ -22,14 +23,13 @@ public class ProjectMemberServiceImpl implements ProjectMemberService {
     private final ProjectMemberRepository projectMemberRepository;
     private final UserRoleRepository userRoleRepositoty;
     private final UserRoleAssignmentRepository userRoleAssignmentRepository;
+    private final ProjectSecurity projectSecurity;
 
     @Override
     public void addMember(int projectId, AddMemberRequest request){
-        //kiem tra vai tro nguoi dung hien tai trong du an co quyen add thanh vien khong
-        int userId = SecurityUtils.getCurrentUserId();
 
-        if(!userRoleAssignmentRepository.existsByUser_UserIdAndRole_RoleName(userId,"ADMIN_PROJECT"))
-            throw new RuntimeException("Không có quyền thêm thành viên vào dự án!");
+        if(!projectSecurity.hasPermission(projectId,"ADD_MEMBER"))
+            throw new RuntimeException("Bạn không có quyền thêm thành viên!");
 
         Project project = projectRepository.findById(projectId).orElseThrow(()->new RuntimeException("Không tìm thấy dự án!"));
 
@@ -62,6 +62,10 @@ public class ProjectMemberServiceImpl implements ProjectMemberService {
 
     @Override
     public void removeMember(int projectId, int userId){
+
+        if(!projectSecurity.hasPermission(projectId,"DELETE_MEMBER"))
+            throw new RuntimeException("Bạn không có quyền xóa thành viên!");
+
         ProjectMemberId id = new ProjectMemberId(projectId,userId);
         projectMemberRepository.deleteById(id);
     }
