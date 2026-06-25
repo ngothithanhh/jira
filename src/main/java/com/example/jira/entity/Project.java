@@ -26,7 +26,7 @@ public class Project {
     @Column(name = "project_name",length = 100)
     private String projectName;
 
-    @Column(name = "project_key", length = 10, unique = true)
+    @Column(name = "project_key", length = 10, unique = true, nullable = false)
     private String projectKey;
 
     private String description;
