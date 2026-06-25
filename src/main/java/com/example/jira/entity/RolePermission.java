@@ -1,5 +1,6 @@
 package com.example.jira.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -18,11 +19,13 @@ public class RolePermission {
     @ManyToOne(fetch = FetchType.LAZY)
     @MapsId("roleId")
     @JoinColumn(name = "role_id", nullable = false)
+    @JsonIgnore
     private UserRole role;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @MapsId("permissionId")
     @JoinColumn(name = "permission_id", nullable = false)
+    @JsonIgnore
     private Permission permission;
 
 
