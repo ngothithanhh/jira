@@ -35,7 +35,7 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
 
     @Override
     public RefreshToken verifyToken(String tokenValue){
-        RefreshToken token = refreshTokenRepository.findByTokenValue(tokenValue).orElseThrow(()->new RuntimeException("Refresh token not found"));
+        RefreshToken token = refreshTokenRepository.findByTokenValue(tokenValue).orElseThrow(()->new RuntimeException("Không tìm thấy refresh token"));
 
         if(token.isRevoked()){
             revokeFamily(token.getFamilyId());
