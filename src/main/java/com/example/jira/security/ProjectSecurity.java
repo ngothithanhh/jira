@@ -3,6 +3,7 @@ package com.example.jira.security;
 import com.example.jira.entity.ProjectMember;
 import com.example.jira.repository.ProjectMemberRepository;
 import com.example.jira.repository.RolePermissionRepository;
+import com.example.jira.enums.PermissionName;
 import com.example.jira.ultils.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -17,7 +18,7 @@ public class ProjectSecurity {
     private final RolePermissionRepository rolePermissionRepository;
 
 
-    public boolean hasPermission(int projectId, String permissionName) {
+    public boolean hasPermission(int projectId, PermissionName permission) {
         int userId = SecurityUtils.getCurrentUserId();
 
         Optional<ProjectMember> memberOpt = projectMemberRepository.findByProject_ProjectIdAndUser_UserId(projectId, userId);
@@ -28,6 +29,6 @@ public class ProjectSecurity {
 
         int roleId = memberOpt.get().getRole().getRoleId();
 
-        return rolePermissionRepository.existsByRole_RoleIdAndPermission_PermissionName(roleId, permissionName);
+        return rolePermissionRepository.existsByRole_RoleIdAndPermission_PermissionName(roleId, permission.name());
     }
 }

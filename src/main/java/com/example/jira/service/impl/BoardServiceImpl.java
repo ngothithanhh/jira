@@ -7,6 +7,7 @@ import com.example.jira.entity.*;
 import com.example.jira.mapper.BoardMapper;
 import com.example.jira.repository.*;
 import com.example.jira.security.ProjectSecurity;
+import com.example.jira.enums.PermissionName;
 import com.example.jira.service.BoardService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -32,7 +33,7 @@ public class BoardServiceImpl implements BoardService {
     @Transactional
     public BoardResponse createBoard(CreateBoardRequest request) {
         Project project = projectRepository.findById(request.getProjectId()).orElseThrow(() -> new RuntimeException("Không tìm thấy dự án"));
-        if (!projectSecurity.hasPermission(project.getProjectId(), "MANAGE_BOARD")) {
+        if (!projectSecurity.hasPermission(project.getProjectId(), PermissionName.MANAGE_BOARD)) {
             throw new RuntimeException("Không có quyền thực hiện");
         }
 
@@ -85,7 +86,7 @@ public class BoardServiceImpl implements BoardService {
     @Transactional
     public BoardResponse addColumn(CreateColumnRequest request) {
         Board board = boardRepository.findById(request.getBoardId()).orElseThrow(() -> new RuntimeException("Không tìm thấy bảng"));
-        if (!projectSecurity.hasPermission(board.getProject().getProjectId(), "MANAGE_BOARD")) {
+        if (!projectSecurity.hasPermission(board.getProject().getProjectId(), PermissionName.MANAGE_BOARD)) {
             throw new RuntimeException("Không có quyền thực hiện");
         }
 
@@ -104,7 +105,7 @@ public class BoardServiceImpl implements BoardService {
     @Transactional
     public void mapStatusToColumn(int columnId, int statusId) {
         BoardColumn column = boardColumnRepository.findById(columnId).orElseThrow(() -> new RuntimeException("Không tìm thấy cột"));
-        if (!projectSecurity.hasPermission(column.getBoard().getProject().getProjectId(), "MANAGE_BOARD")) {
+        if (!projectSecurity.hasPermission(column.getBoard().getProject().getProjectId(), PermissionName.MANAGE_BOARD)) {
             throw new RuntimeException("Không có quyền thực hiện");
         }
         

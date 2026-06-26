@@ -11,6 +11,7 @@ import com.example.jira.repository.UserRepository;
 import com.example.jira.security.ProjectSecurity;
 import com.example.jira.service.CloudinaryService;
 import com.example.jira.service.IssueAttachmentService;
+import com.example.jira.enums.PermissionName;
 import com.example.jira.ultils.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -37,7 +38,7 @@ public class IssueAttachmentServiceImpl implements IssueAttachmentService {
         Issue issue = issueRepository.findById(issueId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy công việc!"));
 
-        if (!projectSecurity.hasPermission(issue.getProject().getProjectId(), "EDIT_ISSUE")) {
+        if (!projectSecurity.hasPermission(issue.getProject().getProjectId(), PermissionName.EDIT_ISSUE)) {
             throw new RuntimeException("Bạn không có quyền đính kèm file trong dự án này!");
         }
 
@@ -66,7 +67,7 @@ public class IssueAttachmentServiceImpl implements IssueAttachmentService {
         Issue issue = issueRepository.findById(issueId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy công việc!"));
 
-        if (!projectSecurity.hasPermission(issue.getProject().getProjectId(), "VIEW_PROJECT")) {
+        if (!projectSecurity.hasPermission(issue.getProject().getProjectId(), PermissionName.VIEW_PROJECT)) {
             throw new RuntimeException("Bạn không có quyền xem trong dự án này!");
         }
 
@@ -86,7 +87,7 @@ public class IssueAttachmentServiceImpl implements IssueAttachmentService {
         int userId = SecurityUtils.getCurrentUserId();
 
         // Chỉ người tải lên hoặc có quyền EDIT_ISSUE mới được xóa
-        if (attachment.getUser().getUserId() != userId && !projectSecurity.hasPermission(issue.getProject().getProjectId(), "EDIT_ISSUE")) {
+        if (attachment.getUser().getUserId() != userId && !projectSecurity.hasPermission(issue.getProject().getProjectId(), PermissionName.EDIT_ISSUE)) {
              throw new RuntimeException("Bạn không có quyền xóa file này!");
         }
 

@@ -13,6 +13,7 @@ import com.example.jira.security.ProjectSecurity;
 import com.example.jira.service.IssueCommentService;
 import com.example.jira.service.NotificationService;
 import com.example.jira.enums.NotificationType;
+import com.example.jira.enums.PermissionName;
 import com.example.jira.ultils.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -38,7 +39,7 @@ public class IssueCommentServiceImpl implements IssueCommentService {
         Issue issue = issueRepository.findById(issueId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy công việc!"));
 
-        if (!projectSecurity.hasPermission(issue.getProject().getProjectId(), "VIEW_PROJECT")) {
+        if (!projectSecurity.hasPermission(issue.getProject().getProjectId(), PermissionName.VIEW_PROJECT)) {
             throw new RuntimeException("Bạn không có quyền bình luận trong dự án này!");
         }
 
@@ -75,7 +76,7 @@ public class IssueCommentServiceImpl implements IssueCommentService {
         Issue issue = issueRepository.findById(issueId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy công việc!"));
 
-        if (!projectSecurity.hasPermission(issue.getProject().getProjectId(), "VIEW_PROJECT")) {
+        if (!projectSecurity.hasPermission(issue.getProject().getProjectId(), PermissionName.VIEW_PROJECT)) {
             throw new RuntimeException("Bạn không có quyền xem bình luận trong dự án này!");
         }
 

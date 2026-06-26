@@ -6,6 +6,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import com.example.jira.enums.SprintState;
 import java.time.LocalDateTime;
 import java.util.Set;
 
@@ -41,7 +42,8 @@ public class Sprint {
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
-    private String state;
+    @Enumerated(EnumType.STRING)
+    private SprintState state;
 
     @OneToMany(mappedBy = "sprint")
     private Set<SprintIssue> sprintIssues;

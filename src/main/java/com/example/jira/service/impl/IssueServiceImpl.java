@@ -10,6 +10,7 @@ import com.example.jira.security.ProjectSecurity;
 import com.example.jira.service.IssueService;
 import com.example.jira.service.NotificationService;
 import com.example.jira.enums.NotificationType;
+import com.example.jira.enums.PermissionName;
 import com.example.jira.ultils.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -31,7 +32,7 @@ public class IssueServiceImpl implements IssueService {
     private final NotificationService notificationService;
     @Override
     public IssueResponse createIssue(CreateIssueRequest request) {
-        if (!projectSecurity.hasPermission(request.getProjectId(), "CREATE_ISSUE")) {
+        if (!projectSecurity.hasPermission(request.getProjectId(), PermissionName.CREATE_ISSUE)) {
             throw new RuntimeException("Bạn không có quyền tạo công việc trong dự án này!");
         }
 
@@ -84,8 +85,8 @@ public class IssueServiceImpl implements IssueService {
         Issue issue = issueRepository.findById(issueId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy công việc!"));
 
-        if (!projectSecurity.hasPermission(issue.getProject().getProjectId(), "EDIT_ISSUE")) {
-            throw new RuntimeException("Bạn không có quyền sửa công việc này!");
+        if (!projectSecurity.hasPermission(issue.getProject().getProjectId(), PermissionName.EDIT_ISSUE)) {
+            throw new RuntimeException("Bạn không có quyền chỉnh sửa công việc này!");
         }
 
         if (request.getSummary() != null) issue.setSummary(request.getSummary());
@@ -129,8 +130,8 @@ public class IssueServiceImpl implements IssueService {
         Issue issue = issueRepository.findById(issueId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy công việc!"));
 
-        if (!projectSecurity.hasPermission(issue.getProject().getProjectId(), "EDIT_ISSUE")) {
-            throw new RuntimeException("Bạn không có quyền đổi trạng thái công việc này!");
+        if (!projectSecurity.hasPermission(issue.getProject().getProjectId(), PermissionName.EDIT_ISSUE)) {
+            throw new RuntimeException("Bạn không có quyền thay đổi trạng thái công việc này!");
         }
 
         IssueStatus toStatus = issueStatusRepository.findById(statusId)
