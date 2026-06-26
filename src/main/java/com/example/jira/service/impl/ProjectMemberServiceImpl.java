@@ -10,6 +10,7 @@ import com.example.jira.service.ProjectMemberService;
 import com.example.jira.service.ProjectService;
 import com.example.jira.enums.EntityType;
 import com.example.jira.enums.NotificationType;
+import com.example.jira.enums.PermissionName;
 import com.example.jira.service.AuditLogService;
 import com.example.jira.service.NotificationService;
 import com.example.jira.ultils.SecurityUtils;
@@ -34,8 +35,8 @@ public class ProjectMemberServiceImpl implements ProjectMemberService {
     @Override
     public void addMember(int projectId, AddMemberRequest request){
 
-        if(!projectSecurity.hasPermission(projectId,"ADD_MEMBER"))
-            throw new RuntimeException("Bạn không có quyền thêm thành viên!");
+        if(!projectSecurity.hasPermission(projectId, PermissionName.ADD_MEMBER))
+            throw new RuntimeException("Bạn không có quyền thêm thành viên vào dự án này!");
 
         Project project = projectRepository.findById(projectId).orElseThrow(()->new RuntimeException("Không tìm thấy dự án!"));
 
@@ -76,8 +77,8 @@ public class ProjectMemberServiceImpl implements ProjectMemberService {
     @Override
     public void removeMember(int projectId, int userId){
 
-        if(!projectSecurity.hasPermission(projectId,"DELETE_MEMBER"))
-            throw new RuntimeException("Bạn không có quyền xóa thành viên!");
+        if(!projectSecurity.hasPermission(projectId, PermissionName.DELETE_MEMBER))
+            throw new RuntimeException("Bạn không có quyền xóa thành viên khỏi dự án này!");
 
         ProjectMemberId id = new ProjectMemberId(projectId,userId);
         projectMemberRepository.deleteById(id);

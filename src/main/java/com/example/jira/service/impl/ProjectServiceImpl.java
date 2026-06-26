@@ -15,6 +15,7 @@ import com.example.jira.service.AuthService;
 import com.example.jira.service.ProjectService;
 import com.example.jira.enums.EntityType;
 import com.example.jira.service.AuditLogService;
+import com.example.jira.enums.PermissionName;
 import com.example.jira.ultils.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -38,8 +39,8 @@ public class ProjectServiceImpl implements ProjectService {
         int userId = SecurityUtils.getCurrentUserId();
         User user = userRepository.findById(userId).orElseThrow(()->new RuntimeException("Không tìm thấy người dùng!"));
 
-        if(!globalSecurity.hasPermission("CREATE_PROJECT"))
-            throw new RuntimeException("Bạn không có quyền tạo dự án!");
+        if(!globalSecurity.hasPermission(PermissionName.CREATE_PROJECT))
+            throw new RuntimeException("Bạn không có quyền tạo project");
 
         if(projectRepository.existsByProjectKey(request.getProjectKey())){
             throw new RuntimeException("Khóa dự án đã tồn tại!");
@@ -74,8 +75,8 @@ public class ProjectServiceImpl implements ProjectService {
     public ProjectSummary updateProject(int id, UpdateProjectRequest request){
         int userId = SecurityUtils.getCurrentUserId();
 
-        if(!projectSecurity.hasPermission(id,"UPDATE_PROJECT"))
-            throw new RuntimeException("Bạn không có quyền sửa dự án!");
+        if(!projectSecurity.hasPermission(id, PermissionName.UPDATE_PROJECT))
+            throw new RuntimeException("Bạn không có quyền sửa dự án này");
 
         Project project = projectRepository.findById(id).orElseThrow(()->new RuntimeException("Không tìm thấy dự án!"));
         project.setProjectName(request.getProjectName());
@@ -88,8 +89,8 @@ public class ProjectServiceImpl implements ProjectService {
     public void deleteProject(int id){
         int userId = SecurityUtils.getCurrentUserId();
 
-        if(!globalSecurity.hasPermission("DELETE_PROJECT"))
-            throw new RuntimeException("Bạn không có quyền xóa dự án!");
+        if(!globalSecurity.hasPermission(PermissionName.DELETE_PROJECT))
+            throw new RuntimeException("Bạn không có quyền xóa project");
 
         Project project = projectRepository.findById(id).orElseThrow(()->new RuntimeException("Không tìm thấy dự án!"));
         projectRepository.delete(project);

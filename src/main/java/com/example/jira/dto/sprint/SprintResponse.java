@@ -1,5 +1,6 @@
 package com.example.jira.dto.sprint;
 
+import com.example.jira.enums.SprintState;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -13,5 +14,5 @@ public class SprintResponse {
     private LocalDateTime endDate;
     private String goal;
     private LocalDateTime createdAt;
-    private String state;
+    private SprintState state;
 }

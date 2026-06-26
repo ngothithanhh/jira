@@ -3,6 +3,8 @@ package com.example.jira.service.impl;
 import com.example.jira.dto.sprint.CreateSprintRequest;
 import com.example.jira.dto.sprint.SprintResponse;
 import com.example.jira.entity.*;
+import com.example.jira.enums.SprintState;
+import com.example.jira.enums.PermissionName;
 import com.example.jira.mapper.SprintMapper;
 import com.example.jira.repository.*;
 import com.example.jira.security.ProjectSecurity;
@@ -29,7 +31,7 @@ public class SprintServiceImpl implements SprintService {
     @Transactional
     public SprintResponse createSprint(CreateSprintRequest request) {
         Project project = projectRepository.findById(request.getProjectId()).orElseThrow(() -> new RuntimeException("Không tìm thấy dự án"));
-        if (!projectSecurity.hasPermission(project.getProjectId(), "MANAGE_SPRINT")) {
+        if (!projectSecurity.hasPermission(project.getProjectId(), PermissionName.MANAGE_SPRINT)) {
             throw new RuntimeException("Không có quyền thực hiện");
         }
 
@@ -40,7 +42,7 @@ public class SprintServiceImpl implements SprintService {
         sprint.setEndDate(request.getEndDate());
         sprint.setGoal(request.getGoal());
         sprint.setCreatedAt(LocalDateTime.now());
-        sprint.setState("FUTURE");
+        sprint.setState(SprintState.FUTURE);
 
         sprint = sprintRepository.save(sprint);
         return SprintMapper.toResponse(sprint);
@@ -65,7 +67,7 @@ public class SprintServiceImpl implements SprintService {
     @Transactional
     public void addIssueToSprint(int sprintId, int issueId) {
         Sprint sprint = sprintRepository.findById(sprintId).orElseThrow(() -> new RuntimeException("Không tìm thấy sprint"));
-        if (!projectSecurity.hasPermission(sprint.getProject().getProjectId(), "MANAGE_SPRINT")) {
+        if (!projectSecurity.hasPermission(sprint.getProject().getProjectId(), PermissionName.MANAGE_SPRINT)) {
             throw new RuntimeException("Không có quyền thực hiện");
         }
         Issue issue = issueRepository.findById(issueId).orElseThrow(() -> new RuntimeException("Không tìm thấy issue"));
@@ -83,7 +85,7 @@ public class SprintServiceImpl implements SprintService {
     @Transactional
     public void removeIssueFromSprint(int sprintId, int issueId) {
         Sprint sprint = sprintRepository.findById(sprintId).orElseThrow(() -> new RuntimeException("Không tìm thấy sprint"));
-        if (!projectSecurity.hasPermission(sprint.getProject().getProjectId(), "MANAGE_SPRINT")) {
+        if (!projectSecurity.hasPermission(sprint.getProject().getProjectId(), PermissionName.MANAGE_SPRINT)) {
             throw new RuntimeException("Không có quyền thực hiện");
         }
         sprintIssueRepository.deleteBySprint_SprintIdAndIssue_IssueId(sprintId, issueId);
@@ -93,10 +95,10 @@ public class SprintServiceImpl implements SprintService {
     @Transactional
     public void startSprint(int sprintId) {
         Sprint sprint = sprintRepository.findById(sprintId).orElseThrow(() -> new RuntimeException("Không tìm thấy sprint"));
-        if (!projectSecurity.hasPermission(sprint.getProject().getProjectId(), "MANAGE_SPRINT")) {
+        if (!projectSecurity.hasPermission(sprint.getProject().getProjectId(), PermissionName.MANAGE_SPRINT)) {
             throw new RuntimeException("Không có quyền thực hiện");
         }
-        sprint.setState("ACTIVE");
+        sprint.setState(SprintState.ACTIVE);
         sprintRepository.save(sprint);
     }
 
@@ -104,10 +106,10 @@ public class SprintServiceImpl implements SprintService {
     @Transactional
     public void completeSprint(int sprintId, Integer moveToSprintId) {
         Sprint sprint = sprintRepository.findById(sprintId).orElseThrow(() -> new RuntimeException("Không tìm thấy sprint"));
-        if (!projectSecurity.hasPermission(sprint.getProject().getProjectId(), "MANAGE_SPRINT")) {
+        if (!projectSecurity.hasPermission(sprint.getProject().getProjectId(), PermissionName.MANAGE_SPRINT)) {
             throw new RuntimeException("Không có quyền thực hiện");
         }
-        sprint.setState("CLOSED");
+        sprint.setState(SprintState.CLOSED);
         sprintRepository.save(sprint);
 
         Sprint nextSprint = null;
