@@ -13,6 +13,8 @@ import com.example.jira.security.GlobalSecurity;
 import com.example.jira.security.ProjectSecurity;
 import com.example.jira.service.AuthService;
 import com.example.jira.service.ProjectService;
+import com.example.jira.enums.EntityType;
+import com.example.jira.service.AuditLogService;
 import com.example.jira.ultils.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -29,6 +31,7 @@ public class ProjectServiceImpl implements ProjectService {
     private final UserRoleAssignmentRepository userRoleAssignmentRepository;
     private final GlobalSecurity globalSecurity;
     private final ProjectSecurity projectSecurity;
+    private final AuditLogService auditLogService;
 
     @Override
     public ProjectSummary createProject(CreateProjectRequest request){
@@ -90,5 +93,7 @@ public class ProjectServiceImpl implements ProjectService {
 
         Project project = projectRepository.findById(id).orElseThrow(()->new RuntimeException("Không tìm thấy dự án!"));
         projectRepository.delete(project);
+        
+        auditLogService.logAction("DELETE", EntityType.PROJECT, id, "Xóa dự án: " + project.getProjectKey());
     }
 }

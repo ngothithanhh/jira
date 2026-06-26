@@ -1,5 +1,6 @@
 package com.example.jira.entity;
 
+import com.example.jira.enums.NotificationType;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -26,6 +27,14 @@ public class Notification {
     @ManyToOne
     @JoinColumn(name = "issue_id")
     private Issue issue;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "actor_id")
+    private User actor;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "notification_type")
+    private NotificationType notificationType;
 
     private String message;
 

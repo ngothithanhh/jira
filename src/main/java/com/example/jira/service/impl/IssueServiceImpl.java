@@ -8,6 +8,8 @@ import com.example.jira.mapper.IssueMapper;
 import com.example.jira.repository.*;
 import com.example.jira.security.ProjectSecurity;
 import com.example.jira.service.IssueService;
+import com.example.jira.service.NotificationService;
+import com.example.jira.enums.NotificationType;
 import com.example.jira.ultils.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -26,6 +28,7 @@ public class IssueServiceImpl implements IssueService {
     private final IssueStatusRepository issueStatusRepository;
     private final ProjectMemberRepository projectMemberRepository;
     private final IssueTransitionRepository issueTransitionRepository;
+    private final NotificationService notificationService;
     @Override
     public IssueResponse createIssue(CreateIssueRequest request) {
         if (!projectSecurity.hasPermission(request.getProjectId(), "CREATE_ISSUE")) {
@@ -104,12 +107,17 @@ public class IssueServiceImpl implements IssueService {
         }
 
         if (assigneeId == null) {
-            issue.setAssignee(null); // Bỏ gán
+            issue.setAssignee(null); 
         } else {
-            // Kiểm tra xem user có phải là thành viên dự án không
             ProjectMember member = projectMemberRepository.findByProject_ProjectIdAndUser_UserId(issue.getProject().getProjectId(), assigneeId)
                     .orElseThrow(() -> new RuntimeException("Người dùng này không thuộc dự án, không thể gán task!"));
             issue.setAssignee(member.getUser());
+            
+            int actorId = SecurityUtils.getCurrentUserId();
+            User actor = userRepository.findById(actorId).orElse(null);
+            String actorName = actor != null ? actor.getFullName() : "Hệ thống";
+            String message = actorName + " đã giao công việc " + issue.getIssueKey() + " cho bạn.";
+            notificationService.sendNotification(assigneeId, issueId, actorId, NotificationType.ISSUE_ASSIGNED, message);
         }
 
         issue.setUpdatedAt(LocalDateTime.now());
@@ -129,10 +137,9 @@ public class IssueServiceImpl implements IssueService {
                 .orElseThrow(() -> new RuntimeException("Trạng thái không hợp lệ!"));
 
         if (issue.getStatus().getStatusId() == statusId) {
-            return IssueMapper.toResponse(issue); // Không có gì thay đổi
+            return IssueMapper.toResponse(issue); 
         }
 
-        // Lưu log chuyển trạng thái
         IssueTransition transition = new IssueTransition();
         transition.setIssue(issue);
         transition.setFromStatus(issue.getStatus());
@@ -145,10 +152,24 @@ public class IssueServiceImpl implements IssueService {
         
         issueTransitionRepository.save(transition);
 
-        // Cập nhật trạng thái mới
         issue.setStatus(toStatus);
         issue.setUpdatedAt(LocalDateTime.now());
 
-        return IssueMapper.toResponse(issueRepository.save(issue));
+        Issue savedIssue = issueRepository.save(issue);
+
+        int actorId = SecurityUtils.getCurrentUserId();
+        User actor = userRepository.findById(actorId).orElse(null);
+        String actorName = actor != null ? actor.getFullName() : "Hệ thống";
+        String message = actorName + " đã cập nhật trạng thái công việc " + issue.getIssueKey() + " thành " + toStatus.getStatusName() + ".";
+
+        if (issue.getReporter() != null && issue.getReporter().getUserId() != actorId) {
+            notificationService.sendNotification(issue.getReporter().getUserId(), issueId, actorId, NotificationType.ISSUE_STATUS_CHANGED, message);
+        }
+        if (issue.getAssignee() != null && issue.getAssignee().getUserId() != actorId && 
+           (issue.getReporter() == null || issue.getReporter().getUserId() != issue.getAssignee().getUserId())) {
+            notificationService.sendNotification(issue.getAssignee().getUserId(), issueId, actorId, NotificationType.ISSUE_STATUS_CHANGED, message);
+        }
+
+        return IssueMapper.toResponse(savedIssue);
     }
 }
