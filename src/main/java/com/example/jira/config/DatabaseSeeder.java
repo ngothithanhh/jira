@@ -38,6 +38,8 @@ public class DatabaseSeeder implements CommandLineRunner {
         Permission createIssuePerm = seedPermission("CREATE_ISSUE");
         Permission editIssuePerm = seedPermission("EDIT_ISSUE");
         Permission deleteIssuePerm = seedPermission("DELETE_ISSUE");
+        Permission manageBoardPerm = seedPermission("MANAGE_BOARD");
+        Permission manageSprintPerm = seedPermission("MANAGE_SPRINT");
 
         // 2. Khởi tạo Role Global (SYSTEM_ADMIN)
         Optional<UserRole> sysAdminOpt = roleRepository.findByRoleName("SYSTEM_ADMIN");
@@ -72,6 +74,22 @@ public class DatabaseSeeder implements CommandLineRunner {
             assignPermissionToRole(pmRole, createIssuePerm);
             assignPermissionToRole(pmRole, editIssuePerm);
             assignPermissionToRole(pmRole, deleteIssuePerm);
+            assignPermissionToRole(pmRole, manageBoardPerm);
+            assignPermissionToRole(pmRole, manageSprintPerm);
+        }
+
+        Optional<UserRole> smOpt = roleRepository.findByRoleName("SCRUM_MASTER");
+        if (smOpt.isEmpty()) {
+            UserRole smRole = new UserRole();
+            smRole.setRoleName("SCRUM_MASTER");
+            smRole = roleRepository.save(smRole);
+            log.info("Seeded SCRUM_MASTER role.");
+
+            // Cấp quyền quản lý board/sprint cho Scrum Master
+            assignPermissionToRole(smRole, manageBoardPerm);
+            assignPermissionToRole(smRole, manageSprintPerm);
+            assignPermissionToRole(smRole, createIssuePerm);
+            assignPermissionToRole(smRole, editIssuePerm);
         }
 
         Optional<UserRole> devOpt = roleRepository.findByRoleName("DEVELOPER");
