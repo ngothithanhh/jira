@@ -8,6 +8,10 @@ import com.example.jira.repository.*;
 import com.example.jira.security.ProjectSecurity;
 import com.example.jira.service.ProjectMemberService;
 import com.example.jira.service.ProjectService;
+import com.example.jira.enums.EntityType;
+import com.example.jira.enums.NotificationType;
+import com.example.jira.service.AuditLogService;
+import com.example.jira.service.NotificationService;
 import com.example.jira.ultils.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -24,6 +28,8 @@ public class ProjectMemberServiceImpl implements ProjectMemberService {
     private final UserRoleRepository userRoleRepositoty;
     private final UserRoleAssignmentRepository userRoleAssignmentRepository;
     private final ProjectSecurity projectSecurity;
+    private final AuditLogService auditLogService;
+    private final NotificationService notificationService;
 
     @Override
     public void addMember(int projectId, AddMemberRequest request){
@@ -51,7 +57,14 @@ public class ProjectMemberServiceImpl implements ProjectMemberService {
         member.setAssignedAt(LocalDateTime.now());
 
         projectMemberRepository.save(member);
-
+        
+        auditLogService.logAction("ADD_MEMBER", EntityType.PROJECT, projectId, "Thêm người dùng ID " + request.getUserId() + " với vai trò ID " + request.getRoleId());
+        
+        int actorId = SecurityUtils.getCurrentUserId();
+        User actor = userRepository.findById(actorId).orElse(null);
+        String actorName = actor != null ? actor.getFullName() : "Hệ thống";
+        String message = actorName + " đã thêm bạn vào dự án " + project.getProjectName() + ".";
+        notificationService.sendNotification(request.getUserId(), null, actorId, NotificationType.PROJECT_INVITED, message);
     }
     @Override
     public List<ProjectMemberResponse> getMembers(int projectId){
@@ -68,5 +81,7 @@ public class ProjectMemberServiceImpl implements ProjectMemberService {
 
         ProjectMemberId id = new ProjectMemberId(projectId,userId);
         projectMemberRepository.deleteById(id);
+        
+        auditLogService.logAction("REMOVE_MEMBER", EntityType.PROJECT, projectId, "Xóa người dùng ID " + userId + " khỏi dự án");
     }
 }

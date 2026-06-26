@@ -47,7 +47,7 @@ public class AuthServiceImpl implements AuthService {
     public AuthResponseDTO register(RegisterRequestDTO request){
 
         if(userRepository.existsByEmail(request.getEmail())){
-            throw new RuntimeException("Email already exists");
+            throw new RuntimeException("Email đã tồn tại!");
         }
 
         User user = new User();
@@ -90,7 +90,7 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public UserSummary getCurrentUser(String email){
-        User user = userRepository.findByEmail(email).orElseThrow(()->new RuntimeException("User not found"));
+        User user = userRepository.findByEmail(email).orElseThrow(()->new RuntimeException("Không tìm thấy người dùng!"));
 
         return new UserSummary(user.getUserId(), user.getEmail(), user.getUserName());
 
@@ -101,7 +101,7 @@ public class AuthServiceImpl implements AuthService {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         String email = authentication.getName();
 
-        User user = userRepository.findByEmail(email).orElseThrow(()->new RuntimeException("User not found"));
+        User user = userRepository.findByEmail(email).orElseThrow(()->new RuntimeException("Không tìm thấy người dùng!"));
 
         return new UserSummary(user.getUserId(), user.getEmail(), user.getUserName());
     }
