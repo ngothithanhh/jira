@@ -103,7 +103,7 @@ public class IssueServiceImpl implements IssueService {
         Issue issue = issueRepository.findById(issueId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy công việc!"));
 
-        if (!projectSecurity.hasPermission(issue.getProject().getProjectId(), "EDIT_ISSUE")) {
+        if (!projectSecurity.hasPermission(issue.getProject().getProjectId(), PermissionName.EDIT_ISSUE)) {
             throw new RuntimeException("Bạn không có quyền gán công việc này!");
         }
 

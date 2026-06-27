@@ -9,7 +9,7 @@ public class ProjectMemberMapper {
                 .userId(projectMember.getUser().getUserId())
                 .name(projectMember.getUser().getUserName())
                 .email(projectMember.getUser().getEmail())
-                .role(projectMember)
+                .role(projectMember.getRole().getRoleName())
                 .build();
     }
 }

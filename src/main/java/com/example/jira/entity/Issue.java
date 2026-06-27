@@ -84,11 +84,11 @@ public class Issue {
     private Project project;
 
     @ManyToOne
-    @JoinColumn(name = "user_id")
+    @JoinColumn(name = "reporter_id")
     private User reporter;
 
     @ManyToOne
-    @JoinColumn(name = "user_id")
+    @JoinColumn(name = "assignee_id")
     private User assignee;
 
     @ManyToOne
