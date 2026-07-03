@@ -7,9 +7,12 @@ public class ProjectMemberMapper {
     public static ProjectMemberResponse toResponse(ProjectMember projectMember){
         return ProjectMemberResponse.builder()
                 .userId(projectMember.getUser().getUserId())
-                .name(projectMember.getUser().getUserName())
+                .userName(projectMember.getUser().getUserName())
+                .fullName(projectMember.getUser().getFullName())
                 .email(projectMember.getUser().getEmail())
                 .role(projectMember.getRole().getRoleName())
+                .roleId(projectMember.getRole().getRoleId())
+                .assignedAt(projectMember.getAssignedAt())
                 .build();
     }
 }

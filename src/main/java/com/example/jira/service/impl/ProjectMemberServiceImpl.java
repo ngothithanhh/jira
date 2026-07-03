@@ -44,6 +44,12 @@ public class ProjectMemberServiceImpl implements ProjectMemberService {
 
         UserRole userRole = userRoleRepositoty.findByRoleId(request.getRoleId()).orElseThrow(()->new RuntimeException("Không tìm thấy vai trò!"));
 
+        if(userRole.getRoleName().equals("PROJECT_MANAGER")){
+            if(projectMemberRepository.existsByProject_ProjectIdAndRole_RoleName(projectId,"PROJECT_MANAGER")){
+                throw new RuntimeException("Đã có PROJECT MANAGER!");
+            }
+        }
+
         ProjectMemberId id = new ProjectMemberId(projectId,user.getUserId());
 
         if(projectMemberRepository.existsById(id)){

@@ -52,4 +52,8 @@ public class Project {
 
     @OneToMany(mappedBy = "project")
     private Set<Issue> issues;
+
+    @OneToMany(mappedBy = "project", cascade = CascadeType.ALL, orphanRemoval = true)
+    private Set<ProjectIssueType> projectIssueTypes;
+
 }

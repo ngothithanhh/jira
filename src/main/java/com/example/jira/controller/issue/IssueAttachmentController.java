@@ -1,4 +1,4 @@
-package com.example.jira.controller;
+package com.example.jira.controller.issue;
 
 import com.example.jira.dto.issue.IssueAttachmentResponse;
 import com.example.jira.service.IssueAttachmentService;

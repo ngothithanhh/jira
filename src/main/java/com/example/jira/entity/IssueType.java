@@ -24,4 +24,8 @@ public class IssueType {
 
     @OneToMany(mappedBy = "issueType")
     private Set<Issue> issues;
+
+    @OneToMany(mappedBy = "issueType", cascade = CascadeType.ALL, orphanRemoval = true)
+    private Set<ProjectIssueType> projectIssueTypes;
+
 }

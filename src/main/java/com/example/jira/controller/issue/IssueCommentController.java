@@ -1,4 +1,4 @@
-package com.example.jira.controller;
+package com.example.jira.controller.issue;
 
 import com.example.jira.dto.issue.CommentResponse;
 import com.example.jira.dto.issue.CreateCommentRequest;

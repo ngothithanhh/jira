@@ -41,4 +41,10 @@ public class IssueController {
             @RequestParam int statusId) {
         return ResponseEntity.ok(issueService.changeIssueStatus(issueId, statusId));
     }
+
+    @GetMapping("/project/{projectId}")
+    public ResponseEntity<java.util.List<IssueResponse>> getIssuesByProject(
+            @PathVariable int projectId) {
+        return ResponseEntity.ok(issueService.getIssuesByProject(projectId));
+    }
 }

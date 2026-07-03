@@ -11,7 +11,8 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 public class ProjectMemberResponse {
     private int userId;
-    private String name;
+    private String userName;
+    private String fullName;
     private String email;
     private int roleId;
     private String role;

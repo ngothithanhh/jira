@@ -173,4 +173,13 @@ public class IssueServiceImpl implements IssueService {
 
         return IssueMapper.toResponse(savedIssue);
     }
+
+    @Override
+    public List<IssueResponse> getIssuesByProject(int projectId) {
+        if (!projectSecurity.hasPermission(projectId, PermissionName.VIEW_PROJECT)) {
+            throw new RuntimeException("Bạn không có quyền xem dự án này!");
+        }
+        List<Issue> issues = issueRepository.findByProject_ProjectId(projectId);
+        return issues.stream().map(IssueMapper::toResponse).toList();
+    }
 }

@@ -13,5 +13,6 @@ public interface IssueService {
     IssueResponse updateIssue(int issueId, UpdateIssueRequest request);
     IssueResponse assignIssue(int issueId, Integer assigneeId);
     IssueResponse changeIssueStatus(int issueId, int statusId);
+    List<IssueResponse> getIssuesByProject(int projectId);
 
 }

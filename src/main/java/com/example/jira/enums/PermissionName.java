@@ -12,7 +12,11 @@ public enum PermissionName {
     CREATE_ISSUE,
     EDIT_ISSUE,
     DELETE_ISSUE,
+
+    CREATE_ISSUE_TYPE,
     
     MANAGE_SPRINT,
-    MANAGE_BOARD
+    MANAGE_BOARD,
+
+    DELETE_USER
 }

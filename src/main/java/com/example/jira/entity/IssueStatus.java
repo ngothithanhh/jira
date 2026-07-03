@@ -1,5 +1,6 @@
 package com.example.jira.entity;
 
+import com.example.jira.enums.StatusCategory;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -30,4 +31,12 @@ public class IssueStatus {
 
     @OneToMany(mappedBy = "issueStatus")
     private Set<BoardColumnStatus> boardColumnStatuses;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status_category", nullable = false)
+    private StatusCategory statusCategory;
+
+    @OneToMany(mappedBy = "status")
+    private Set<Issue> issues;
+
 }
