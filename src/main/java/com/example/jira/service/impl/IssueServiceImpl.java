@@ -30,6 +30,7 @@ public class IssueServiceImpl implements IssueService {
     private final ProjectMemberRepository projectMemberRepository;
     private final IssueTransitionRepository issueTransitionRepository;
     private final NotificationService notificationService;
+    private final WorkflowRuleRepository workflowRuleRepository;
     @Override
     public IssueResponse createIssue(CreateIssueRequest request) {
         if (!projectSecurity.hasPermission(request.getProjectId(), PermissionName.CREATE_ISSUE)) {
@@ -139,6 +140,10 @@ public class IssueServiceImpl implements IssueService {
 
         if (issue.getStatus().getStatusId() == statusId) {
             return IssueMapper.toResponse(issue); 
+        }
+
+        if (!workflowRuleRepository.existsByFromStatus_StatusIdAndToStatus_StatusId(issue.getStatus().getStatusId(), statusId)) {
+            throw new RuntimeException("Chuyển đổi trạng thái không hợp lệ theo quy trình (Workflow)!");
         }
 
         IssueTransition transition = new IssueTransition();
