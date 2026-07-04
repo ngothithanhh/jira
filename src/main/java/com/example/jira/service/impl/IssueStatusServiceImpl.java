@@ -33,7 +33,7 @@ public class IssueStatusServiceImpl implements IssueStatusService {
     @Transactional
     public IssueStatusResponse createStatus(IssueStatusRequest request){
 
-        if(issueStatusRepository.existByStatusName(request.getStatusName()))
+        if(issueStatusRepository.existsByStatusName(request.getStatusName()))
             throw new RuntimeException("Tên trạng thái đã có!");
 
         IssueStatus status = new IssueStatus();
@@ -56,7 +56,7 @@ public class IssueStatusServiceImpl implements IssueStatusService {
     @Override
     @Transactional
     public void deleteStatus(int id){
-        boolean inUsedInIssues = issueRepository.existByStatus_StatusId(id);
+        boolean inUsedInIssues = issueRepository.existsByStatus_StatusId(id);
 
         if(inUsedInIssues)
             throw new RuntimeException("Không thể xóa trạng thái này vì đang có công việc sử dụng nó!");

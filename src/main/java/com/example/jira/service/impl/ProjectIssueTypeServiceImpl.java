@@ -30,7 +30,7 @@ public class ProjectIssueTypeServiceImpl implements ProjectIssueTypeService {
     @Override
     public List<ProjectIssueTypeResponse> getProjectIssueTypes(int projectId){
 
-        List<ProjectIssueType> pt = projectIssueTypeRepository.findByProjectId(projectId);
+        List<ProjectIssueType> pt = projectIssueTypeRepository.findByProject_ProjectId(projectId);
 
         return pt.stream().map(ProjectIssueTypeMapper::toResponse).toList();
 
@@ -55,7 +55,7 @@ public class ProjectIssueTypeServiceImpl implements ProjectIssueTypeService {
     @Override
     @Transactional
     public void setDefaultIssueType(int projectId, int issueTypeId){
-        List<ProjectIssueType> allTypesInProject = projectIssueTypeRepository.findByProjectId(projectId);
+        List<ProjectIssueType> allTypesInProject = projectIssueTypeRepository.findByProject_ProjectId(projectId);
 
         boolean found = false;
         for(ProjectIssueType projectIssueType : allTypesInProject){

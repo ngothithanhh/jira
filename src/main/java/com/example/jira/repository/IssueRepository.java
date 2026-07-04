@@ -20,5 +20,5 @@ public interface IssueRepository extends JpaRepository<Issue,Integer> {
     List<Issue> findByProject_ProjectId(int projectId);
     boolean existsByIssueType_IssueTypeId(int id);
     boolean existsByProject_ProjectIdAndIssueType_IssueTypeId(int projectId, int issueTypeId);
-    boolean existByStatus_StatusId(int statusId);
+    boolean existsByStatus_StatusId(int statusId);
 }

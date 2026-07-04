@@ -11,6 +11,6 @@ import java.util.List;
 @Repository
 public interface ProjectIssueTypeRepository extends JpaRepository<ProjectIssueType,ProjectIssueTypeId> {
     boolean existsByIssueType_IssueTypeId(int id);
-    List<ProjectIssueType> findByProjectId(int projectId);
+    List<ProjectIssueType> findByProject_ProjectId(int projectId);
     boolean existsById(ProjectIssueTypeId id);
 }
