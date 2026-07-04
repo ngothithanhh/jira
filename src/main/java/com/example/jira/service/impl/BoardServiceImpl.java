@@ -3,6 +3,7 @@ package com.example.jira.service.impl;
 import com.example.jira.dto.board.BoardResponse;
 import com.example.jira.dto.board.CreateBoardRequest;
 import com.example.jira.dto.board.CreateColumnRequest;
+import com.example.jira.dto.board.UpdateColumnOrderRequest;
 import com.example.jira.entity.*;
 import com.example.jira.mapper.BoardMapper;
 import com.example.jira.repository.*;
@@ -117,5 +118,42 @@ public class BoardServiceImpl implements BoardService {
         bcs.setIssueStatus(status);
 
         boardColumnStatusRepository.save(bcs);
+    }
+
+    @Override
+    @Transactional
+    public void updateColumnOrder(int boardId, List<UpdateColumnOrderRequest> requests) {
+        Board board = boardRepository.findById(boardId).orElseThrow(() -> new RuntimeException("Không tìm thấy bảng"));
+        if (!projectSecurity.hasPermission(board.getProject().getProjectId(), PermissionName.MANAGE_BOARD)) {
+            throw new RuntimeException("Không có quyền thực hiện");
+        }
+
+        for (UpdateColumnOrderRequest request : requests) {
+            BoardColumn column = boardColumnRepository.findById(request.getColumnId())
+                    .orElseThrow(() -> new RuntimeException("Không tìm thấy cột với ID: " + request.getColumnId()));
+            
+            // Kiểm tra cột có thuộc bảng này không
+            if (column.getBoard().getBoardId() != boardId) {
+                throw new RuntimeException("Cột không thuộc bảng này");
+            }
+            
+            column.setPosition(request.getPosition());
+            boardColumnRepository.save(column);
+        }
+    }
+
+    @Override
+    @Transactional
+    public void unmapStatusFromColumn(int columnId, int statusId) {
+        BoardColumn column = boardColumnRepository.findById(columnId).orElseThrow(() -> new RuntimeException("Không tìm thấy cột"));
+        if (!projectSecurity.hasPermission(column.getBoard().getProject().getProjectId(), PermissionName.MANAGE_BOARD)) {
+            throw new RuntimeException("Không có quyền thực hiện");
+        }
+
+        BoardColumnStatusId id = new BoardColumnStatusId(columnId, statusId);
+        BoardColumnStatus bcs = boardColumnStatusRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Trạng thái này chưa được ánh xạ vào cột"));
+
+        boardColumnStatusRepository.delete(bcs);
     }
 }

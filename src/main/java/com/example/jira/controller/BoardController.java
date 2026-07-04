@@ -4,6 +4,7 @@ import com.example.jira.dto.board.BoardResponse;
 import com.example.jira.dto.board.CreateBoardRequest;
 import com.example.jira.dto.board.CreateColumnRequest;
 import com.example.jira.dto.board.MapColumnStatusRequest;
+import com.example.jira.dto.board.UpdateColumnOrderRequest;
 import com.example.jira.service.BoardService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -44,5 +45,17 @@ public class BoardController {
     public ResponseEntity<Void> mapStatusToColumn(@Valid @RequestBody MapColumnStatusRequest request) {
         boardService.mapStatusToColumn(request.getColumnId(), request.getStatusId());
         return ResponseEntity.ok().build();
+    }
+
+    @PutMapping("/{boardId}/columns/order")
+    public ResponseEntity<Void> updateColumnOrder(@PathVariable int boardId, @Valid @RequestBody List<UpdateColumnOrderRequest> requests) {
+        boardService.updateColumnOrder(boardId, requests);
+        return ResponseEntity.ok().build();
+    }
+
+    @DeleteMapping("/columns/map-status")
+    public ResponseEntity<Void> unmapStatusFromColumn(@RequestParam int columnId, @RequestParam int statusId) {
+        boardService.unmapStatusFromColumn(columnId, statusId);
+        return ResponseEntity.noContent().build();
     }
 }
