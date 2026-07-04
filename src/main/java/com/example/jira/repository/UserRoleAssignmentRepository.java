@@ -13,4 +13,5 @@ public interface UserRoleAssignmentRepository extends JpaRepository<UserRoleAssi
 
     boolean existsByUser_UserIdAndRole_RoleName(int userId, String roleName);
 
+    boolean existsByRole_RoleId(int roleId);
 }

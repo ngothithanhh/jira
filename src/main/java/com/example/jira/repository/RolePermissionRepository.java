@@ -10,6 +10,6 @@ public interface RolePermissionRepository extends JpaRepository<RolePermission, 
     boolean existsByRole_RoleIdAndPermission_PermissionName(int roleId, String permissionName);
     boolean existsByRole_RoleIdAndPermission_PermissionId(int roleId, int permissionId);
     Optional<RolePermission> findByRole_RoleIdAndPermission_PermissionId(int roleId, int permissionId);
-
+    boolean existsByPermission_PermissionId(int permissionId);
 
 }
