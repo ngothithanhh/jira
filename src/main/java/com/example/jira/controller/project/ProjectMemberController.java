@@ -5,6 +5,7 @@ import com.example.jira.dto.project.ProjectMemberResponse;
 import com.example.jira.service.AuthService;
 import com.example.jira.service.PermissionService;
 import com.example.jira.service.ProjectMemberService;
+import com.example.jira.enums.PermissionName;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -23,7 +24,7 @@ public class ProjectMemberController {
 
         int userId = authService.getCurrentUser().getId();
 
-        permissionService.checkPermission(userId, "ADD_MEMBER",projectId);
+        permissionService.checkPermission(userId, PermissionName.ADD_MEMBER.name(), projectId);
 
         projectMemberService.addMember(projectId,request);
     }
@@ -37,7 +38,7 @@ public class ProjectMemberController {
     public void removeMember(@PathVariable int projectId, @PathVariable int userId){
         int currentUserId = authService.getCurrentUser().getId();
 
-        permissionService.checkPermission(currentUserId, "REMOVE_MEMBER", projectId);
+        permissionService.checkPermission(currentUserId, PermissionName.DELETE_MEMBER.name(), projectId);
         projectMemberService.removeMember(projectId,userId);
     }
 

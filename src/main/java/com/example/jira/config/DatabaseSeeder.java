@@ -1,14 +1,27 @@
 package com.example.jira.config;
 
-import com.example.jira.entity.*;
-import com.example.jira.repository.*;
+import com.example.jira.entity.Permission;
+import com.example.jira.entity.RolePermission;
+import com.example.jira.entity.RolePermissionId;
+import com.example.jira.entity.User;
+import com.example.jira.entity.UserRole;
+import com.example.jira.entity.UserRoleAssignment;
+import com.example.jira.entity.UserRoleAssignmentId;
+import com.example.jira.enums.PermissionName;
+import com.example.jira.repository.PermissionRepository;
+import com.example.jira.repository.RolePermissionRepository;
+import com.example.jira.repository.UserRepository;
+import com.example.jira.repository.UserRoleAssignmentRepository;
+import com.example.jira.repository.UserRoleRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 @Component
@@ -24,128 +37,136 @@ public class DatabaseSeeder implements CommandLineRunner {
     private final PasswordEncoder passwordEncoder;
 
     @Override
-    public void run(String... args) throws Exception {
+    @Transactional
+    public void run(String... args) {
         log.info("Checking and seeding database...");
 
-        // 1. Khởi tạo các Permission cơ bản (Cả Global và Project)
-        Permission createProjectPerm = seedPermission("CREATE_PROJECT");
-        Permission editProjectPerm = seedPermission("EDIT_PROJECT");
-        Permission deleteProjectPerm = seedPermission("DELETE_PROJECT");
-        Permission manageUsersPerm = seedPermission("MANAGE_USERS");
-        
-        Permission addMemberPerm = seedPermission("ADD_MEMBER");
-        Permission removeMemberPerm = seedPermission("REMOVE_MEMBER");
-        Permission createIssuePerm = seedPermission("CREATE_ISSUE");
-        Permission editIssuePerm = seedPermission("EDIT_ISSUE");
-        Permission deleteIssuePerm = seedPermission("DELETE_ISSUE");
-        Permission manageBoardPerm = seedPermission("MANAGE_BOARD");
-        Permission manageSprintPerm = seedPermission("MANAGE_SPRINT");
+        migrateLegacyPermission("EDIT_PROJECT", PermissionName.UPDATE_PROJECT);
+        migrateLegacyPermission("REMOVE_MEMBER", PermissionName.DELETE_MEMBER);
+        migrateLegacyPermission("MANAGE_USERS", PermissionName.DELETE_USER);
 
-        // 2. Khởi tạo Role Global (SYSTEM_ADMIN)
-        Optional<UserRole> sysAdminOpt = roleRepository.findByRoleName("SYSTEM_ADMIN");
-        UserRole sysAdminRole;
-        if (sysAdminOpt.isEmpty()) {
-            sysAdminRole = new UserRole();
-            sysAdminRole.setRoleName("SYSTEM_ADMIN");
-            sysAdminRole = roleRepository.save(sysAdminRole);
-            log.info("Seeded SYSTEM_ADMIN role.");
+        Permission createProject = seedPermission(PermissionName.CREATE_PROJECT);
+        Permission updateProject = seedPermission(PermissionName.UPDATE_PROJECT);
+        Permission deleteProject = seedPermission(PermissionName.DELETE_PROJECT);
+        Permission deleteUser = seedPermission(PermissionName.DELETE_USER);
+        Permission viewProject = seedPermission(PermissionName.VIEW_PROJECT);
+        Permission addMember = seedPermission(PermissionName.ADD_MEMBER);
+        Permission deleteMember = seedPermission(PermissionName.DELETE_MEMBER);
+        Permission createIssue = seedPermission(PermissionName.CREATE_ISSUE);
+        Permission editIssue = seedPermission(PermissionName.EDIT_ISSUE);
+        Permission deleteIssue = seedPermission(PermissionName.DELETE_ISSUE);
+        Permission manageBoard = seedPermission(PermissionName.MANAGE_BOARD);
+        Permission manageSprint = seedPermission(PermissionName.MANAGE_SPRINT);
+        seedPermission(PermissionName.CREATE_ISSUE_TYPE);
 
-            // Cấp toàn bộ quyền Global cho Admin
-            assignPermissionToRole(sysAdminRole, createProjectPerm);
-            assignPermissionToRole(sysAdminRole, editProjectPerm);
-            assignPermissionToRole(sysAdminRole, deleteProjectPerm);
-            assignPermissionToRole(sysAdminRole, manageUsersPerm);
-        } else {
-            sysAdminRole = sysAdminOpt.get();
-        }
+        UserRole systemAdmin = seedRole("SYSTEM_ADMIN");
+        assignPermissionToRole(systemAdmin, createProject);
+        assignPermissionToRole(systemAdmin, updateProject);
+        assignPermissionToRole(systemAdmin, deleteProject);
+        assignPermissionToRole(systemAdmin, deleteUser);
 
-        // 3. Khởi tạo Role Dự án (PROJECT_MANAGER và DEVELOPER)
-        Optional<UserRole> pmOpt = roleRepository.findByRoleName("PROJECT_MANAGER");
-        if (pmOpt.isEmpty()) {
-            UserRole pmRole = new UserRole();
-            pmRole.setRoleName("PROJECT_MANAGER");
-            pmRole = roleRepository.save(pmRole);
-            log.info("Seeded PROJECT_MANAGER role.");
+        UserRole projectManager = seedRole("PROJECT_MANAGER");
+        assignPermissionToRole(projectManager, updateProject);
+        assignPermissionToRole(projectManager, viewProject);
+        assignPermissionToRole(projectManager, addMember);
+        assignPermissionToRole(projectManager, deleteMember);
+        assignPermissionToRole(projectManager, createIssue);
+        assignPermissionToRole(projectManager, editIssue);
+        assignPermissionToRole(projectManager, deleteIssue);
+        assignPermissionToRole(projectManager, manageBoard);
+        assignPermissionToRole(projectManager, manageSprint);
 
-            // Cấp quyền quản lý dự án cho PM
-            assignPermissionToRole(pmRole, editProjectPerm);
-            assignPermissionToRole(pmRole, addMemberPerm);
-            assignPermissionToRole(pmRole, removeMemberPerm);
-            assignPermissionToRole(pmRole, createIssuePerm);
-            assignPermissionToRole(pmRole, editIssuePerm);
-            assignPermissionToRole(pmRole, deleteIssuePerm);
-            assignPermissionToRole(pmRole, manageBoardPerm);
-            assignPermissionToRole(pmRole, manageSprintPerm);
-        }
+        UserRole scrumMaster = seedRole("SCRUM_MASTER");
+        assignPermissionToRole(scrumMaster, viewProject);
+        assignPermissionToRole(scrumMaster, manageBoard);
+        assignPermissionToRole(scrumMaster, manageSprint);
+        assignPermissionToRole(scrumMaster, createIssue);
+        assignPermissionToRole(scrumMaster, editIssue);
 
-        Optional<UserRole> smOpt = roleRepository.findByRoleName("SCRUM_MASTER");
-        if (smOpt.isEmpty()) {
-            UserRole smRole = new UserRole();
-            smRole.setRoleName("SCRUM_MASTER");
-            smRole = roleRepository.save(smRole);
-            log.info("Seeded SCRUM_MASTER role.");
+        UserRole developer = seedRole("DEVELOPER");
+        assignPermissionToRole(developer, viewProject);
+        assignPermissionToRole(developer, createIssue);
+        assignPermissionToRole(developer, editIssue);
 
-            // Cấp quyền quản lý board/sprint cho Scrum Master
-            assignPermissionToRole(smRole, manageBoardPerm);
-            assignPermissionToRole(smRole, manageSprintPerm);
-            assignPermissionToRole(smRole, createIssuePerm);
-            assignPermissionToRole(smRole, editIssuePerm);
-        }
+        seedDefaultAdmin(systemAdmin);
+    }
 
-        Optional<UserRole> devOpt = roleRepository.findByRoleName("DEVELOPER");
-        if (devOpt.isEmpty()) {
-            UserRole devRole = new UserRole();
-            devRole.setRoleName("DEVELOPER");
-            devRole = roleRepository.save(devRole);
-            log.info("Seeded DEVELOPER role.");
-
-            // Cấp quyền làm task cho DEV
-            assignPermissionToRole(devRole, createIssuePerm);
-            assignPermissionToRole(devRole, editIssuePerm);
-        }
-
-        // 4. Khởi tạo tài khoản Root Admin
-        if (!userRepository.existsByEmail("admin@jira.com")) {
-            User rootAdmin = new User();
-            rootAdmin.setEmail("admin@jira.com");
-            rootAdmin.setUserName("admin");
-            rootAdmin.setFullName("System Administrator");
-            rootAdmin.setPasswordHash(passwordEncoder.encode("123456"));
-            rootAdmin.setCreatedAt(LocalDateTime.now());
-            rootAdmin = userRepository.save(rootAdmin);
-
-            // Gán role SYSTEM_ADMIN cho tài khoản này
-            UserRoleAssignment assignment = new UserRoleAssignment();
-            UserRoleAssignmentId assignmentId = new UserRoleAssignmentId(rootAdmin.getUserId(), sysAdminRole.getRoleId());
-            assignment.setId(assignmentId);
-            assignment.setUser(rootAdmin);
-            assignment.setRole(sysAdminRole);
-            assignment.setAssignedAt(LocalDateTime.now());
-            assignmentRepository.save(assignment);
-
-            log.info("✅ TẠO TÀI KHOẢN ADMIN MẶC ĐỊNH THÀNH CÔNG: admin@jira.com / 123456");
-        } else {
-            log.info("Tài khoản admin@jira.com đã tồn tại, bỏ qua bước khởi tạo user.");
-        }
+    private Permission seedPermission(PermissionName permissionName) {
+        return seedPermission(permissionName.name());
     }
 
     private Permission seedPermission(String permissionName) {
-        Optional<Permission> permOpt = permissionRepository.findByPermissionName(permissionName);
-        if (permOpt.isPresent()) {
-            return permOpt.get();
+        return permissionRepository.findByPermissionName(permissionName).orElseGet(() -> {
+            Permission permission = new Permission();
+            permission.setPermissionName(permissionName);
+            return permissionRepository.save(permission);
+        });
+    }
+
+    private UserRole seedRole(String roleName) {
+        return roleRepository.findByRoleName(roleName).orElseGet(() -> {
+            UserRole role = new UserRole();
+            role.setRoleName(roleName);
+            log.info("Seeded {} role.", roleName);
+            return roleRepository.save(role);
+        });
+    }
+
+    private void migrateLegacyPermission(String legacyName, PermissionName canonicalName) {
+        Optional<Permission> legacyPermission = permissionRepository.findByPermissionName(legacyName);
+        if (legacyPermission.isEmpty()) {
+            return;
         }
-        Permission p = new Permission();
-        p.setPermissionName(permissionName);
-        return permissionRepository.save(p);
+
+        Optional<Permission> canonicalPermission = permissionRepository.findByPermissionName(canonicalName.name());
+        if (canonicalPermission.isEmpty()) {
+            Permission permission = legacyPermission.get();
+            permission.setPermissionName(canonicalName.name());
+            permissionRepository.save(permission);
+            log.info("Renamed permission {} to {}.", legacyName, canonicalName);
+            return;
+        }
+
+        Permission oldPermission = legacyPermission.get();
+        Permission newPermission = canonicalPermission.get();
+        List<RolePermission> oldAssignments = rolePermissionRepository.findByPermission_PermissionId(oldPermission.getPermissionId());
+        for (RolePermission assignment : oldAssignments) {
+            assignPermissionToRole(assignment.getRole(), newPermission);
+        }
+        rolePermissionRepository.deleteAll(oldAssignments);
+        permissionRepository.delete(oldPermission);
+        log.info("Merged permission {} into {}.", legacyName, canonicalName);
     }
 
     private void assignPermissionToRole(UserRole role, Permission permission) {
-        if (!rolePermissionRepository.existsByRole_RoleIdAndPermission_PermissionId(role.getRoleId(), permission.getPermissionId())) {
-            RolePermission rp = new RolePermission();
-            rp.setId(new RolePermissionId(role.getRoleId(), permission.getPermissionId()));
-            rp.setRole(role);
-            rp.setPermission(permission);
-            rolePermissionRepository.save(rp);
+        if (rolePermissionRepository.existsByRole_RoleIdAndPermission_PermissionId(role.getRoleId(), permission.getPermissionId())) {
+            return;
         }
+        RolePermission assignment = new RolePermission();
+        assignment.setId(new RolePermissionId(role.getRoleId(), permission.getPermissionId()));
+        assignment.setRole(role);
+        assignment.setPermission(permission);
+        rolePermissionRepository.save(assignment);
+    }
+
+    private void seedDefaultAdmin(UserRole systemAdmin) {
+        if (userRepository.existsByEmail("admin@jira.com")) {
+            return;
+        }
+
+        User admin = new User();
+        admin.setEmail("admin@jira.com");
+        admin.setUserName("admin");
+        admin.setFullName("System Administrator");
+        admin.setPasswordHash(passwordEncoder.encode("123456"));
+        admin.setCreatedAt(LocalDateTime.now());
+        admin = userRepository.save(admin);
+
+        UserRoleAssignment assignment = new UserRoleAssignment();
+        assignment.setId(new UserRoleAssignmentId(admin.getUserId(), systemAdmin.getRoleId()));
+        assignment.setUser(admin);
+        assignment.setRole(systemAdmin);
+        assignment.setAssignedAt(LocalDateTime.now());
+        assignmentRepository.save(assignment);
     }
 }

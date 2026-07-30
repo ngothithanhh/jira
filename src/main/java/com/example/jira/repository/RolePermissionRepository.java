@@ -4,6 +4,7 @@ import com.example.jira.entity.RolePermission;
 import com.example.jira.entity.RolePermissionId;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.List;
 import java.util.Optional;
 
 public interface RolePermissionRepository extends JpaRepository<RolePermission, RolePermissionId> {
@@ -11,5 +12,6 @@ public interface RolePermissionRepository extends JpaRepository<RolePermission, 
     boolean existsByRole_RoleIdAndPermission_PermissionId(int roleId, int permissionId);
     Optional<RolePermission> findByRole_RoleIdAndPermission_PermissionId(int roleId, int permissionId);
     boolean existsByPermission_PermissionId(int permissionId);
+    List<RolePermission> findByPermission_PermissionId(int permissionId);
 
 }
