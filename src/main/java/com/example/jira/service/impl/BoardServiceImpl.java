@@ -67,6 +67,9 @@ public class BoardServiceImpl implements BoardService {
     public BoardResponse getBoard(int boardId) {
         Board board = boardRepository.findById(boardId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy bảng"));
+        if (!projectSecurity.hasPermission(board.getProject().getProjectId(), PermissionName.VIEW_PROJECT)) {
+            throw new RuntimeException("Bạn không có quyền xem bảng này");
+        }
 
         List<BoardColumn> columns = boardColumnRepository.findByBoard_BoardIdOrderByPositionAsc(boardId);
         return BoardMapper.toResponse(board, columns);
@@ -75,6 +78,9 @@ public class BoardServiceImpl implements BoardService {
     @Override
     @Transactional(readOnly = true)
     public List<BoardResponse> getBoardsByProject(int projectId) {
+        if (!projectSecurity.hasPermission(projectId, PermissionName.VIEW_PROJECT)) {
+            throw new RuntimeException("Bạn không có quyền xem bảng của dự án này");
+        }
         return boardRepository.findByProject_ProjectId(projectId).stream()
                 .map(board -> {
                     List<BoardColumn> columns = boardColumnRepository.findByBoard_BoardIdOrderByPositionAsc(board.getBoardId());

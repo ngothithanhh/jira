@@ -7,8 +7,8 @@ import com.example.jira.dto.workflow.WorkflowRuleResponse;
 import java.util.List;
 
 public interface WorkflowRuleService {
-    List<WorkflowRuleResponse> getAllRules();
-    WorkflowRuleResponse createRule(WorkflowRuleRequest request);
-    void deleteRule(int ruleId);
-    List<IssueStatusResponse> getAllowedNextStatuses(int currentStatusId);
+    List<WorkflowRuleResponse> getAllRules(int projectId);
+    WorkflowRuleResponse createRule(int projectId, WorkflowRuleRequest request);
+    void deleteRule(int projectId, int ruleId);
+    List<IssueStatusResponse> getAllowedNextStatuses(int projectId, int currentStatusId);
 }

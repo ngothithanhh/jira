@@ -35,7 +35,7 @@ public class IssueAttachmentServiceImpl implements IssueAttachmentService {
     @Override
     @Transactional
     public IssueAttachmentResponse uploadAttachment(int issueId, MultipartFile file) {
-        Issue issue = issueRepository.findById(issueId)
+        Issue issue = issueRepository.findByIssueIdAndDeletedAtIsNull(issueId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy công việc!"));
 
         if (!projectSecurity.hasPermission(issue.getProject().getProjectId(), PermissionName.EDIT_ISSUE)) {
@@ -64,7 +64,7 @@ public class IssueAttachmentServiceImpl implements IssueAttachmentService {
     @Override
     @Transactional(readOnly = true)
     public List<IssueAttachmentResponse> getAttachments(int issueId) {
-        Issue issue = issueRepository.findById(issueId)
+        Issue issue = issueRepository.findByIssueIdAndDeletedAtIsNull(issueId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy công việc!"));
 
         if (!projectSecurity.hasPermission(issue.getProject().getProjectId(), PermissionName.VIEW_PROJECT)) {
@@ -84,6 +84,9 @@ public class IssueAttachmentServiceImpl implements IssueAttachmentService {
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy file đính kèm!"));
 
         Issue issue = attachment.getIssue();
+        if (issue.getDeletedAt() != null) {
+            throw new RuntimeException("Không tìm thấy công việc!");
+        }
         int userId = SecurityUtils.getCurrentUserId();
 
         // Chỉ người tải lên hoặc có quyền EDIT_ISSUE mới được xóa

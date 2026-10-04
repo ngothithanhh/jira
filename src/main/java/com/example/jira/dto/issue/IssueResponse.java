@@ -5,6 +5,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Data
@@ -17,21 +18,26 @@ public class IssueResponse {
     private String summary;
     private String description;
     private String priority;
-    private int storyPoints;
+    private Integer storyPoints;
+    private LocalDate dueDate;
+    private Long backlogRank;
+    private Integer boardPosition;
     
+    private Integer statusId;
     private String statusName;
+    private Integer issueTypeId;
     private String issueTypeName;
 
-    private int projectId;
+    private Integer projectId;
     private String projectKey;
 
-    private int reporterId;
+    private Integer reporterId;
     private String reporterName;
-    private int assigneeId;
+    private Integer assigneeId;
     private String assigneeName;
 
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
-    private int parentIssueId;
+    private Integer parentIssueId;
 }

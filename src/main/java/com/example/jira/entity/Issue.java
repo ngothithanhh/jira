@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.math.BigInteger;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
@@ -29,11 +30,27 @@ public class Issue {
 
     private String priority;
 
+    @Column(name = "due_date")
+    private LocalDate dueDate;
+
+    @Column(name = "backlog_rank")
+    private Long backlogRank;
+
+    @Column(name = "board_position")
+    private Integer boardPosition;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
+
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "deleted_by")
+    private User deletedBy;
 
     @Version
     private Long version;

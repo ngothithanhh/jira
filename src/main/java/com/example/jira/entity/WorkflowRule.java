@@ -18,6 +18,10 @@ public class WorkflowRule {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private int ruleId;
 
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "project_id", nullable = false)
+    private Project project;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "from_status_id", nullable = false)
     private IssueStatus fromStatus;

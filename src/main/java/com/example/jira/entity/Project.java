@@ -38,6 +38,10 @@ public class Project {
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "default_issue_status_id", nullable = false)
+    private IssueStatus defaultIssueStatus;
+
     @OneToMany(mappedBy = "project")
     private Set<ProjectMember> projectMembers;
 
@@ -55,5 +59,8 @@ public class Project {
 
     @OneToMany(mappedBy = "project", cascade = CascadeType.ALL, orphanRemoval = true)
     private Set<ProjectIssueType> projectIssueTypes;
+
+    @OneToMany(mappedBy = "project", cascade = CascadeType.ALL, orphanRemoval = true)
+    private Set<WorkflowRule> workflowRules;
 
 }

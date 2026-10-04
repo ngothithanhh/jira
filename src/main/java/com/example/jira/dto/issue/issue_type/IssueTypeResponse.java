@@ -6,5 +6,6 @@ import lombok.Data;
 @Data
 @Builder
 public class IssueTypeResponse {
+    private int issueTypeId;
     private String typeName;
 }

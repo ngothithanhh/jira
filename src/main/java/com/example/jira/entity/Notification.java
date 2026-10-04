@@ -38,6 +38,7 @@ public class Notification {
 
     private String message;
 
+    @Column(name = "read")
     private boolean read;
 
     @Column(name = "created_at")

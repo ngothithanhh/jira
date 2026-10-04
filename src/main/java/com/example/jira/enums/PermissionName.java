@@ -17,6 +17,7 @@ public enum PermissionName {
     
     MANAGE_SPRINT,
     MANAGE_BOARD,
+    MANAGE_WORKFLOW,
 
     DELETE_USER
 }

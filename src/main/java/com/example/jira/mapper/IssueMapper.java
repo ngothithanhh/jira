@@ -17,8 +17,13 @@ public class IssueMapper {
                 .description(issue.getDescription())
                 .priority(issue.getPriority())
                 .storyPoints(issue.getStoryPoints())
+                .dueDate(issue.getDueDate())
+                .backlogRank(issue.getBacklogRank())
+                .boardPosition(issue.getBoardPosition())
                 
+                .statusId(issue.getStatus() != null ? issue.getStatus().getStatusId() : null)
                 .statusName(issue.getStatus() != null ? issue.getStatus().getStatusName() : null)
+                .issueTypeId(issue.getIssueType() != null ? issue.getIssueType().getIssueTypeId() : null)
                 .issueTypeName(issue.getIssueType() != null ? issue.getIssueType().getTypeName() : null)
 
                 .projectId(issue.getProject() != null ? issue.getProject().getProjectId() : 0)

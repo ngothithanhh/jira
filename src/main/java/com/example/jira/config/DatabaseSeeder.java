@@ -57,6 +57,7 @@ public class DatabaseSeeder implements CommandLineRunner {
         Permission deleteIssue = seedPermission(PermissionName.DELETE_ISSUE);
         Permission manageBoard = seedPermission(PermissionName.MANAGE_BOARD);
         Permission manageSprint = seedPermission(PermissionName.MANAGE_SPRINT);
+        Permission manageWorkflow = seedPermission(PermissionName.MANAGE_WORKFLOW);
         seedPermission(PermissionName.CREATE_ISSUE_TYPE);
 
         UserRole systemAdmin = seedRole("SYSTEM_ADMIN");
@@ -75,11 +76,13 @@ public class DatabaseSeeder implements CommandLineRunner {
         assignPermissionToRole(projectManager, deleteIssue);
         assignPermissionToRole(projectManager, manageBoard);
         assignPermissionToRole(projectManager, manageSprint);
+        assignPermissionToRole(projectManager, manageWorkflow);
 
         UserRole scrumMaster = seedRole("SCRUM_MASTER");
         assignPermissionToRole(scrumMaster, viewProject);
         assignPermissionToRole(scrumMaster, manageBoard);
         assignPermissionToRole(scrumMaster, manageSprint);
+        assignPermissionToRole(scrumMaster, manageWorkflow);
         assignPermissionToRole(scrumMaster, createIssue);
         assignPermissionToRole(scrumMaster, editIssue);
 

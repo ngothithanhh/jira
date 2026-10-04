@@ -5,6 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDate;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -14,4 +16,7 @@ public class UpdateIssueRequest {
     private String description;
     private String priority;
     private Integer storyPoints;
+    private LocalDate dueDate;
+    private Long backlogRank;
+    private Integer boardPosition;
 }

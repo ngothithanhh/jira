@@ -13,4 +13,5 @@ public interface ProjectIssueTypeRepository extends JpaRepository<ProjectIssueTy
     boolean existsByIssueType_IssueTypeId(int id);
     List<ProjectIssueType> findByProject_ProjectId(int projectId);
     boolean existsById(ProjectIssueTypeId id);
+    boolean existsByProject_ProjectIdAndIssueType_IssueTypeId(int projectId, int issueTypeId);
 }

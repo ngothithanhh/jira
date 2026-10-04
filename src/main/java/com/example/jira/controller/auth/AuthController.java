@@ -4,6 +4,7 @@ import com.example.jira.dto.auth.AuthResponseDTO;
 import com.example.jira.dto.auth.LoginRequestDTO;
 import com.example.jira.dto.auth.RefreshRequestDTO;
 import com.example.jira.dto.auth.RegisterRequestDTO;
+import com.example.jira.dto.common.ApiErrorResponse;
 import com.example.jira.dto.user.UserSummary;
 import com.example.jira.service.AuthService;
 import lombok.RequiredArgsConstructor;
@@ -44,9 +45,8 @@ public class AuthController {
     @GetMapping("/me")
     public ResponseEntity<?> getCurrentUser(Authentication authentication) {
         if (authentication == null || !authentication.isAuthenticated()) {
-            return ResponseEntity.status(401).body(new Object() {
-                public String getMessage() { return "Unauthorized"; }
-            });
+            return ResponseEntity.status(401)
+                    .body(ApiErrorResponse.of("Authentication is required", "UNAUTHORIZED"));
         }
 
 //        System.out.println("AUTH: " + authentication);

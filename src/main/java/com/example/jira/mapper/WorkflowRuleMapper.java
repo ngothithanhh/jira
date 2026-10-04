@@ -12,6 +12,10 @@ public class WorkflowRuleMapper {
 
         WorkflowRuleResponse response = new WorkflowRuleResponse();
         response.setRuleId(rule.getRuleId());
+
+        if (rule.getProject() != null) {
+            response.setProjectId(rule.getProject().getProjectId());
+        }
         
         if (rule.getFromStatus() != null) {
             response.setFromStatus(IssueStatusMapper.toResponse(rule.getFromStatus()));

@@ -36,7 +36,7 @@ public class IssueCommentServiceImpl implements IssueCommentService {
     @Override
     @Transactional
     public CommentResponse addComment(int issueId, CreateCommentRequest request) {
-        Issue issue = issueRepository.findById(issueId)
+        Issue issue = issueRepository.findByIssueIdAndDeletedAtIsNull(issueId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy công việc!"));
 
         if (!projectSecurity.hasPermission(issue.getProject().getProjectId(), PermissionName.VIEW_PROJECT)) {
@@ -73,7 +73,7 @@ public class IssueCommentServiceImpl implements IssueCommentService {
     @Override
     @Transactional(readOnly = true)
     public List<CommentResponse> getCommentsByIssue(int issueId) {
-        Issue issue = issueRepository.findById(issueId)
+        Issue issue = issueRepository.findByIssueIdAndDeletedAtIsNull(issueId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy công việc!"));
 
         if (!projectSecurity.hasPermission(issue.getProject().getProjectId(), PermissionName.VIEW_PROJECT)) {

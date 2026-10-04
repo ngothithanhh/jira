@@ -16,7 +16,8 @@ import java.time.LocalDateTime;
 public class IssueTransition {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private int transition_id;
+    @Column(name = "transition_id")
+    private int transitionId;
 
     @ManyToOne
     @JoinColumn(name = "issue_id")

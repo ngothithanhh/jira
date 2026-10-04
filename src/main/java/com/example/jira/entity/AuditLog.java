@@ -35,7 +35,7 @@ public class AuditLog {
     @Column(name = "entity_id")
     private int entityId;
 
-    @Column(columnDefinition = "NVARCHAR(MAX)")
+    @Column(columnDefinition = "TEXT")
     private String description;
 
     @Column(name = "created_at", nullable = false)

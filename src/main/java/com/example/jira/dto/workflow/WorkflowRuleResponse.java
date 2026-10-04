@@ -12,6 +12,7 @@ import lombok.Setter;
 @AllArgsConstructor
 public class WorkflowRuleResponse {
     private int ruleId;
+    private int projectId;
     private IssueStatusResponse fromStatus;
     private IssueStatusResponse toStatus;
 }

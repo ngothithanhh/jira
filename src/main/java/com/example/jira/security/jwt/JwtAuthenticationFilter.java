@@ -1,7 +1,9 @@
 package com.example.jira.security.jwt;
 
 import com.example.jira.security.CustomUserDetailsService;
-import io.jsonwebtoken.io.IOException;
+import com.example.jira.dto.common.ApiErrorResponse;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -14,6 +16,8 @@ import org.springframework.security.web.authentication.WebAuthenticationDetailsS
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
+import java.io.IOException;
+
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Autowired
@@ -21,6 +25,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     @Autowired
     private CustomUserDetailsService userDetailsService;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Override
     protected void doFilterInternal(
@@ -37,8 +44,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         // Lấy token từ header
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
 
-            token = authHeader.substring(7);
-            username = jwtUtil.extractUsername(token);
+            try {
+                token = authHeader.substring(7);
+                username = jwtUtil.extractUsername(token);
+            } catch (JwtException | IllegalArgumentException exception) {
+                writeUnauthorized(response);
+                return;
+            }
         }
 
         // Nếu có username và chưa authenticate
@@ -66,10 +78,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         // Tiếp tục filter chain
-        try {
-            filterChain.doFilter(request, response);
-        } catch (java.io.IOException e) {
-            throw new RuntimeException(e);
-        }
+        filterChain.doFilter(request, response);
+    }
+
+    private void writeUnauthorized(HttpServletResponse response) throws IOException {
+        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        response.setContentType("application/json");
+        objectMapper.writeValue(response.getOutputStream(), ApiErrorResponse.of("Access token is invalid or expired", "UNAUTHORIZED"));
     }
 }

@@ -52,12 +52,18 @@ public class SprintServiceImpl implements SprintService {
     @Transactional(readOnly = true)
     public SprintResponse getSprint(int sprintId) {
         Sprint sprint = sprintRepository.findById(sprintId).orElseThrow(() -> new RuntimeException("Không tìm thấy sprint"));
+        if (!projectSecurity.hasPermission(sprint.getProject().getProjectId(), PermissionName.VIEW_PROJECT)) {
+            throw new RuntimeException("Bạn không có quyền xem sprint này");
+        }
         return SprintMapper.toResponse(sprint);
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<SprintResponse> getSprintsByProject(int projectId) {
+        if (!projectSecurity.hasPermission(projectId, PermissionName.VIEW_PROJECT)) {
+            throw new RuntimeException("Bạn không có quyền xem sprint của dự án này");
+        }
         return sprintRepository.findByProject_ProjectId(projectId).stream()
                 .map(SprintMapper::toResponse)
                 .collect(Collectors.toList());
@@ -70,7 +76,11 @@ public class SprintServiceImpl implements SprintService {
         if (!projectSecurity.hasPermission(sprint.getProject().getProjectId(), PermissionName.MANAGE_SPRINT)) {
             throw new RuntimeException("Không có quyền thực hiện");
         }
-        Issue issue = issueRepository.findById(issueId).orElseThrow(() -> new RuntimeException("Không tìm thấy issue"));
+        Issue issue = issueRepository.findByIssueIdAndDeletedAtIsNull(issueId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy issue"));
+        if (issue.getProject().getProjectId() != sprint.getProject().getProjectId()) {
+            throw new RuntimeException("Issue phải thuộc cùng dự án");
+        }
 
         SprintIssue sprintIssue = new SprintIssue();
         sprintIssue.setId(new SprintIssueId(sprintId, issueId));
@@ -115,6 +125,9 @@ public class SprintServiceImpl implements SprintService {
         Sprint nextSprint = null;
         if (moveToSprintId != null) {
             nextSprint = sprintRepository.findById(moveToSprintId).orElseThrow(() -> new RuntimeException("Không tìm thấy sprint đích"));
+            if (nextSprint.getProject().getProjectId() != sprint.getProject().getProjectId()) {
+                throw new RuntimeException("Sprint đích phải thuộc cùng dự án");
+            }
         }
 
         List<SprintIssue> sprintIssues = sprintIssueRepository.findBySprint_SprintId(sprintId);

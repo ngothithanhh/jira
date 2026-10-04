@@ -4,11 +4,13 @@ import com.example.jira.dto.project.CreateProjectRequest;
 import com.example.jira.dto.project.ProjectSummary;
 import com.example.jira.dto.project.UpdateProjectRequest;
 import com.example.jira.entity.Project;
+import com.example.jira.entity.IssueStatus;
 import com.example.jira.entity.User;
 import com.example.jira.mapper.ProjectMapper;
 import com.example.jira.repository.ProjectRepository;
 import com.example.jira.repository.UserRepository;
 import com.example.jira.repository.UserRoleAssignmentRepository;
+import com.example.jira.repository.IssueStatusRepository;
 import com.example.jira.security.GlobalSecurity;
 import com.example.jira.security.ProjectSecurity;
 import com.example.jira.service.AuthService;
@@ -16,6 +18,7 @@ import com.example.jira.service.ProjectService;
 import com.example.jira.enums.EntityType;
 import com.example.jira.service.AuditLogService;
 import com.example.jira.enums.PermissionName;
+import com.example.jira.enums.StatusCategory;
 import com.example.jira.ultils.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -33,6 +36,7 @@ public class ProjectServiceImpl implements ProjectService {
     private final GlobalSecurity globalSecurity;
     private final ProjectSecurity projectSecurity;
     private final AuditLogService auditLogService;
+    private final IssueStatusRepository issueStatusRepository;
 
     @Override
     public ProjectSummary createProject(CreateProjectRequest request){
@@ -51,6 +55,9 @@ public class ProjectServiceImpl implements ProjectService {
         project.setProjectKey(request.getProjectKey());
         project.setDescription(request.getDescription());
         project.setCreatedAt(LocalDateTime.now());
+        IssueStatus defaultStatus = issueStatusRepository.findFirstByStatusCategoryOrderByStatusIdAsc(StatusCategory.TO_DO)
+                .orElseThrow(() -> new RuntimeException("Chưa cấu hình trạng thái mặc định nhóm TO_DO!"));
+        project.setDefaultIssueStatus(defaultStatus);
 
         project.setLead(user);
         projectRepository.save(project);
@@ -62,11 +69,17 @@ public class ProjectServiceImpl implements ProjectService {
     @Override
     public List<ProjectSummary> getProjects(){
         List<Project> projects = projectRepository.findAll();
-        return projects.stream().map(projectMapper::toResponse).toList();
+        return projects.stream()
+                .filter(project -> projectSecurity.hasPermission(project.getProjectId(), PermissionName.VIEW_PROJECT))
+                .map(projectMapper::toResponse)
+                .toList();
     }
 
     @Override
     public ProjectSummary getProject(int id){
+        if (!projectSecurity.hasPermission(id, PermissionName.VIEW_PROJECT)) {
+            throw new RuntimeException("Bạn không có quyền xem dự án này");
+        }
         Project project = projectRepository.findById(id).orElseThrow(()->new RuntimeException("Không tìm thấy dự án!"));
         return projectMapper.toResponse(project);
     }
