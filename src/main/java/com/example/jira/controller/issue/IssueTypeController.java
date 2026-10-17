@@ -23,23 +23,22 @@ public class IssueTypeController {
         return ResponseEntity.ok(issueTypeService.getAllIssueTypes());
     }
 
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
     @PostMapping
-//    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<IssueTypeResponse> createIssueType(@RequestBody @Valid IssueTypeRequest request) {
         return ResponseEntity.ok(issueTypeService.createIssueType(request));
     }
 
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
     @PutMapping("/{id}")
-//    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<IssueTypeResponse> updateIssueType(@PathVariable int id, @RequestBody IssueTypeRequest request) {
         return ResponseEntity.ok(issueTypeService.updateIssueType(id, request));
     }
 
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
     @DeleteMapping("/{id}")
-//    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Void> deleteIssueType(@PathVariable int id) {
         issueTypeService.deleteIssueType(id);
         return ResponseEntity.noContent().build();
     }
 }
-

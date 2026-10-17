@@ -15,6 +15,8 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 @Getter @Setter
 public class SprintIssue {
+    private Boolean completed;
+    private Integer finalStoryPoints;
     @EmbeddedId
     private SprintIssueId id;
 

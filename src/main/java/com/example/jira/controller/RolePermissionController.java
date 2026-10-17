@@ -3,8 +3,10 @@ package com.example.jira.controller;
 import com.example.jira.service.RolePermissionService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+@PreAuthorize("hasRole('SYSTEM_ADMIN')")
 @RestController
 @RequestMapping("/api/roles/{roleId}/permissions")
 @RequiredArgsConstructor

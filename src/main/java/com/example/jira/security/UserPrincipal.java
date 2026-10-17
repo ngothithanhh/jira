@@ -13,6 +13,7 @@ import java.util.List;
 
 public class UserPrincipal implements UserDetails {
     private int id;
+    private boolean locked;
     private String email;
     private String password;
     private Collection<? extends GrantedAuthority> authorities;
@@ -36,12 +37,14 @@ public class UserPrincipal implements UserDetails {
                 authorities.add(new SimpleGrantedAuthority("ROLE_" + assignment.getRole().getRoleName().toUpperCase()));
             }
         }
-        return new UserPrincipal(
+        UserPrincipal principal = new UserPrincipal(
                 user.getUserId(),
                 user.getEmail(),
                 user.getPasswordHash(),
                 authorities
         );
+        principal.locked = user.isLocked();
+        return principal;
     }
 
     public int getId() {
@@ -65,7 +68,7 @@ public class UserPrincipal implements UserDetails {
     }
 
     @Override public boolean isAccountNonExpired() { return true; }
-    @Override public boolean isAccountNonLocked() { return true; }
+    @Override public boolean isAccountNonLocked() { return !locked; }
     @Override public boolean isCredentialsNonExpired() { return true; }
     @Override public boolean isEnabled() { return true; }
 }

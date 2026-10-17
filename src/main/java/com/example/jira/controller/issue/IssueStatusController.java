@@ -23,20 +23,20 @@ public class IssueStatusController {
         return ResponseEntity.ok(issueStatusService.getAllStatuses());
     }
 
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
     @PostMapping
-//    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<IssueStatusResponse> createStatus(@RequestBody @Valid IssueStatusRequest request) {
         return ResponseEntity.ok(issueStatusService.createStatus(request));
     }
 
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
     @PutMapping("/{id}")
-//    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<IssueStatusResponse> updateStatus(@PathVariable int id, @RequestBody @Valid IssueStatusRequest request) {
         return ResponseEntity.ok(issueStatusService.updateStatus(id, request));
     }
 
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
     @DeleteMapping("/{id}")
-//    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Void> deleteStatus(@PathVariable int id) {
         issueStatusService.deleteStatus(id);
         return ResponseEntity.noContent().build();

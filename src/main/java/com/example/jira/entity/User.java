@@ -16,6 +16,8 @@ import java.util.Set;
 @NoArgsConstructor
 @AllArgsConstructor
 public class User {
+    @Column(nullable = false)
+    private boolean locked;
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

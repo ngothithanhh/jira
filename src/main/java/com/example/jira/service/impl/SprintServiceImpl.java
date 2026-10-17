@@ -192,8 +192,10 @@ public class SprintServiceImpl implements SprintService {
         for (SprintIssue si : sprintIssues) {
             Issue issue = si.getIssue();
             boolean isDone = issue.getStatus() != null && issue.getStatus().getStatusCategory() == StatusCategory.DONE;
+            si.setCompleted(isDone);
+            si.setFinalStoryPoints(issue.getStoryPoints());
+            sprintIssueRepository.save(si);
             if (!isDone) {
-                sprintIssueRepository.deleteBySprint_SprintIdAndIssue_IssueId(sprintId, issue.getIssueId());
                 if (nextSprint != null) {
                     SprintIssue moved = new SprintIssue();
                     moved.setId(new SprintIssueId(nextSprint.getSprintId(), issue.getIssueId()));
@@ -210,6 +212,7 @@ public class SprintServiceImpl implements SprintService {
             }
         }
         sprint.setState(SprintState.CLOSED);
+        sprint.setCompletedAt(LocalDateTime.now());
         sprintRepository.save(sprint);
         auditLogService.logAction("SPRINT_COMPLETED", EntityType.SPRINT, sprintId,
                 "Hoàn tất sprint " + sprint.getSprintName());

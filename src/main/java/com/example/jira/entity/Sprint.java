@@ -16,6 +16,7 @@ import java.util.Set;
 @NoArgsConstructor
 @AllArgsConstructor
 public class Sprint {
+    private LocalDateTime completedAt;
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

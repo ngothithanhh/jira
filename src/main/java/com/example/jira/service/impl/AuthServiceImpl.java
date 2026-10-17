@@ -11,12 +11,14 @@ import com.example.jira.security.jwt.JwtUtil;
 import com.example.jira.service.AuthService;
 import com.example.jira.service.RefreshTokenService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 
@@ -70,6 +72,9 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public AuthResponseDTO refreshToken(String refreshToken){
         RefreshToken token = refreshTokenService.verifyToken(refreshToken);
+        if (token.getUser().isLocked()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Account is locked");
+        }
 
         RefreshToken newToken = refreshTokenService.rotateRefreshToken(token);
 
