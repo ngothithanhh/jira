@@ -32,6 +32,8 @@ public class IssueCommentServiceImpl implements IssueCommentService {
     private final UserRepository userRepository;
     private final ProjectSecurity projectSecurity;
     private final NotificationService notificationService;
+    private final com.example.jira.service.IssueCollaborationAccess access;
+    private final com.example.jira.service.AuditLogService audit;
 
     @Override
     @Transactional
@@ -55,6 +57,8 @@ public class IssueCommentServiceImpl implements IssueCommentService {
 
         IssueComment savedComment = issueCommentRepository.save(comment);
 
+        audit.logAction("COMMENT_CREATED", com.example.jira.enums.EntityType.ISSUE, issueId, savedComment.getCommentText());
+
         // Notify reporter and assignee
         String actorName = user.getFullName() != null ? user.getFullName() : "Ai đó";
         String message = actorName + " đã bình luận vào công việc " + issue.getIssueKey() + ".";
@@ -68,6 +72,32 @@ public class IssueCommentServiceImpl implements IssueCommentService {
         }
 
         return IssueCommentMapper.toResponse(savedComment);
+    }
+
+    @Override
+    @Transactional
+    public CommentResponse updateComment(int issueId, int commentId, CreateCommentRequest request) {
+        Issue issue = access.requireView(issueId);
+        IssueComment comment = findComment(issueId, commentId);
+        access.requireOwnerOrEditor(issue, comment.getUser().getUserId());
+        comment.setCommentText(request.getCommentText());
+        audit.logAction("COMMENT_UPDATED", com.example.jira.enums.EntityType.ISSUE, issueId, request.getCommentText());
+        return IssueCommentMapper.toResponse(issueCommentRepository.save(comment));
+    }
+
+    @Override
+    @Transactional
+    public void deleteComment(int issueId, int commentId) {
+        Issue issue = access.requireView(issueId);
+        IssueComment comment = findComment(issueId, commentId);
+        access.requireOwnerOrEditor(issue, comment.getUser().getUserId());
+        audit.logAction("COMMENT_DELETED", com.example.jira.enums.EntityType.ISSUE, issueId, comment.getCommentText());
+        issueCommentRepository.delete(comment);
+    }
+
+    private IssueComment findComment(int issueId, int id) {
+        return issueCommentRepository.findById(id).filter(c -> c.getIssue().getIssueId() == issueId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND, "Comment not found"));
     }
 
     @Override

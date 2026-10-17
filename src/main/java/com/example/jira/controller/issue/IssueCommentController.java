@@ -23,6 +23,17 @@ public class IssueCommentController {
         return new ResponseEntity<>(issueCommentService.addComment(issueId, request), HttpStatus.CREATED);
     }
 
+    @PutMapping("/{commentId}")
+    public CommentResponse update(@PathVariable int issueId, @PathVariable int commentId, @Valid @RequestBody CreateCommentRequest request) {
+        return issueCommentService.updateComment(issueId, commentId, request);
+    }
+
+    @DeleteMapping("/{commentId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void delete(@PathVariable int issueId, @PathVariable int commentId) {
+        issueCommentService.deleteComment(issueId, commentId);
+    }
+
     @GetMapping
     public ResponseEntity<List<CommentResponse>> getComments(@PathVariable int issueId) {
         return ResponseEntity.ok(issueCommentService.getCommentsByIssue(issueId));

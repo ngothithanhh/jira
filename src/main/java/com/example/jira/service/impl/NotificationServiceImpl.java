@@ -12,8 +12,13 @@ import com.example.jira.repository.UserRepository;
 import com.example.jira.service.NotificationService;
 import com.example.jira.ultils.SecurityUtils;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -71,6 +76,24 @@ public class NotificationServiceImpl implements NotificationService {
                 .stream()
                 .map(NotificationMapper::toResponse)
                 .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<NotificationResponse> getPage(boolean unreadOnly, int page, int size) {
+        if (page < 0 || size < 1 || size > 100)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid pagination (size 1..100)");
+        var pageable = PageRequest.of(page, size,
+                Sort.by(Sort.Direction.DESC, "createdAt", "notificationId"));
+        int userId = SecurityUtils.getCurrentUserId();
+        return (unreadOnly ? notificationRepository.findByUser_UserIdAndReadFalse(userId, pageable)
+                : notificationRepository.findByUser_UserId(userId, pageable)).map(NotificationMapper::toResponse);
+    }
+
+    @Override
+    @Transactional
+    public void markAllAsRead() {
+        notificationRepository.markAllRead(SecurityUtils.getCurrentUserId());
     }
 
     @Override

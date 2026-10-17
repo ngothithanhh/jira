@@ -16,6 +16,7 @@ import com.example.jira.service.NotificationService;
 import com.example.jira.ultils.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -33,6 +34,7 @@ public class ProjectMemberServiceImpl implements ProjectMemberService {
     private final NotificationService notificationService;
 
     @Override
+    @Transactional
     public void addMember(int projectId, AddMemberRequest request){
 
         if(!projectSecurity.hasPermission(projectId, PermissionName.ADD_MEMBER))

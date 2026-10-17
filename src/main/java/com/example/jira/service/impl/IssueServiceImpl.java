@@ -162,8 +162,8 @@ public class IssueServiceImpl implements IssueService {
 
         issue.setUpdatedAt(LocalDateTime.now());
         Issue savedIssue = issueRepository.save(issue);
-        auditLogService.logAction("ISSUE_UPDATED", EntityType.ISSUE, issueId,
-                "Cập nhật người được giao cho issue " + savedIssue.getIssueKey());
+        auditLogService.logAction("ISSUE_ASSIGNED", EntityType.ISSUE, issueId,
+                "Assignee=" + assigneeId + "; issue " + savedIssue.getIssueKey());
         return IssueMapper.toResponse(savedIssue);
     }
 

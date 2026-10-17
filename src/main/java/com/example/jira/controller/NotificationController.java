@@ -28,6 +28,20 @@ public class NotificationController {
         return ResponseEntity.ok(responses);
     }
 
+    @GetMapping("/page")
+    public org.springframework.data.domain.Page<NotificationResponse> page(
+            @RequestParam(defaultValue = "false") boolean unreadOnly,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return notificationService.getPage(unreadOnly, page, size);
+    }
+
+    @PutMapping("/read-all")
+    public ResponseEntity<Void> readAll() {
+        notificationService.markAllAsRead();
+        return ResponseEntity.noContent().build();
+    }
+
     @PutMapping("/{id}/read")
     public ResponseEntity<Void> markAsRead(@PathVariable int id) {
         notificationService.markAsRead(id);

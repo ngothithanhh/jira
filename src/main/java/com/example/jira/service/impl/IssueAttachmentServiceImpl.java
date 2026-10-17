@@ -31,17 +31,19 @@ public class IssueAttachmentServiceImpl implements IssueAttachmentService {
     private final UserRepository userRepository;
     private final CloudinaryService cloudinaryService;
     private final ProjectSecurity projectSecurity;
+    private final com.example.jira.service.IssueCollaborationAccess access;
+    private final com.example.jira.service.AuditLogService audit;
 
     @Override
     @Transactional
     public IssueAttachmentResponse uploadAttachment(int issueId, MultipartFile file) {
-        Issue issue = issueRepository.findByIssueIdAndDeletedAtIsNull(issueId)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy công việc!"));
+        Issue issue = access.requireView(issueId);
 
         if (!projectSecurity.hasPermission(issue.getProject().getProjectId(), PermissionName.EDIT_ISSUE)) {
             throw new RuntimeException("Bạn không có quyền đính kèm file trong dự án này!");
         }
 
+        AttachmentFilePolicy.validate(file);
         try {
             String fileUrl = cloudinaryService.uploadFile(file);
 
@@ -54,7 +56,9 @@ public class IssueAttachmentServiceImpl implements IssueAttachmentService {
             attachment.setUser(user);
             attachment.setUploadedAt(LocalDateTime.now());
 
-            return IssueAttachmentMapper.toResponse(attachmentRepository.save(attachment));
+            IssueAttachment saved = attachmentRepository.save(attachment);
+            audit.logAction("ATTACHMENT_UPLOADED", com.example.jira.enums.EntityType.ISSUE, issueId, file.getOriginalFilename());
+            return IssueAttachmentMapper.toResponse(saved);
 
         } catch (Exception e) {
             throw new RuntimeException("Lỗi upload file: " + e.getMessage());
@@ -77,6 +81,17 @@ public class IssueAttachmentServiceImpl implements IssueAttachmentService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
+    @Override
+    public byte[] downloadAttachment(int attachmentId) {
+        IssueAttachment attachment = attachmentRepository.findById(attachmentId).orElseThrow();
+        access.requireView(attachment.getIssue().getIssueId());
+        try { return cloudinaryService.downloadFile(attachment.getFilePath()); }
+        catch (java.io.IOException ex) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_GATEWAY, "Attachment download failed", ex);
+        }
+    }
+
     @Override
     @Transactional
     public void deleteAttachment(int attachmentId) {
@@ -87,6 +102,7 @@ public class IssueAttachmentServiceImpl implements IssueAttachmentService {
         if (issue.getDeletedAt() != null) {
             throw new RuntimeException("Không tìm thấy công việc!");
         }
+        access.requireView(issue.getIssueId());
         int userId = SecurityUtils.getCurrentUserId();
 
         // Chỉ người tải lên hoặc có quyền EDIT_ISSUE mới được xóa
@@ -96,11 +112,11 @@ public class IssueAttachmentServiceImpl implements IssueAttachmentService {
 
         try {
             cloudinaryService.deleteFile(attachment.getFilePath());
-        } catch (Exception e) {
-            // Log error but continue to delete from DB
-            System.out.println("Cảnh báo: Lỗi xóa file trên Cloudinary: " + e.getMessage());
+        } catch (java.io.IOException e) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_GATEWAY, "Attachment storage deletion failed", e);
         }
 
+        audit.logAction("ATTACHMENT_DELETED", com.example.jira.enums.EntityType.ISSUE, issue.getIssueId(), "Attachment " + attachmentId);
         attachmentRepository.delete(attachment);
     }
 }
