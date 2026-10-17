@@ -20,41 +20,51 @@ public class CloudinaryServiceImpl implements CloudinaryService {
     public String uploadFile(MultipartFile file) throws IOException {
         // resource_type auto allows raw files (docs, xlsx, pdf) as well as images
         Map uploadResult = cloudinary.uploader().upload(file.getBytes(), ObjectUtils.asMap(
-                "resource_type", "auto"
+                "resource_type", "auto", "type", "authenticated"
         ));
         return uploadResult.get("secure_url").toString();
     }
 
     @Override
-    public void deleteFile(String fileUrl) throws IOException {
-        // Extract publicId from URL
-        // A typical Cloudinary URL: https://res.cloudinary.com/<cloud_name>/image/upload/v1234567890/<public_id>.<ext>
-        // Extracting it perfectly depends on folder structures, but for basic usage:
-        String publicId = extractPublicId(fileUrl);
-        if (publicId != null && !publicId.isEmpty()) {
-            // we use resource_type auto but delete needs specific or we can try raw/image. 
-            // In Cloudinary, deleting raw files requires resource_type "raw" or "image".
-            // Since we don't know easily, we can try deleting as "image" then "raw".
-            try {
-                cloudinary.uploader().destroy(publicId, ObjectUtils.asMap("resource_type", "image"));
-                cloudinary.uploader().destroy(publicId, ObjectUtils.asMap("resource_type", "raw"));
-            } catch (Exception e) {
-                System.out.println("Could not delete file from Cloudinary: " + e.getMessage());
-            }
+    public byte[] downloadFile(String fileUrl) throws IOException {
+        java.net.URI uri = java.net.URI.create(fileUrl);
+        String[] parts = uri.getPath().split("/", 5);
+        if (!"https".equals(uri.getScheme()) || !"res.cloudinary.com".equals(uri.getHost())
+                || parts.length < 5 || !java.util.Set.of("upload", "authenticated").contains(parts[3]))
+            throw new IOException("Invalid storage URL");
+        String url = fileUrl;
+        if ("authenticated".equals(parts[3])) {
+            String path = parts[4].replaceFirst("^v[0-9]+/", "");
+            url = cloudinary.url().secure(true).signed(true).resourceType(parts[2]).type("authenticated").generate(path);
         }
+        var connection = (java.net.HttpURLConnection) java.net.URI.create(url).toURL().openConnection();
+        connection.setInstanceFollowRedirects(false);
+        connection.setConnectTimeout(10000);
+        connection.setReadTimeout(30000);
+        try {
+            if (connection.getResponseCode() != 200) throw new IOException("Storage download failed");
+            try (var input = connection.getInputStream()) {
+                byte[] bytes = input.readNBytes((int) AttachmentFilePolicy.MAX_BYTES + 1);
+                if (bytes.length > AttachmentFilePolicy.MAX_BYTES) throw new IOException("Attachment exceeds size limit");
+                return bytes;
+            }
+        } finally { connection.disconnect(); }
     }
 
-    private String extractPublicId(String fileUrl) {
-        try {
-            String[] parts = fileUrl.split("/");
-            String lastPart = parts[parts.length - 1];
-            int dotIndex = lastPart.lastIndexOf('.');
-            if (dotIndex > 0) {
-                return lastPart.substring(0, dotIndex);
-            }
-            return lastPart;
-        } catch (Exception e) {
-            return null;
+    @Override
+    public void deleteFile(String fileUrl) throws IOException {
+        java.net.URI uri = java.net.URI.create(fileUrl);
+        String[] parts = uri.getPath().split("/", 5);
+        if (parts.length < 5 || !java.util.Set.of("upload", "authenticated").contains(parts[3])
+                || !java.util.Set.of("image", "raw", "video").contains(parts[2]))
+            throw new IOException("Unrecognized Cloudinary resource URL");
+        String publicId = parts[4].replaceFirst("^v[0-9]+/", "");
+        if (!"raw".equals(parts[2])) {
+            int dot = publicId.lastIndexOf('.');
+            if (dot > publicId.lastIndexOf('/')) publicId = publicId.substring(0, dot);
         }
+        Map result = cloudinary.uploader().destroy(publicId, ObjectUtils.asMap("resource_type", parts[2], "type", parts[3], "invalidate", true));
+        if (!java.util.Set.of("ok", "not found").contains(String.valueOf(result.get("result"))))
+            throw new IOException("Cloudinary deletion failed");
     }
 }

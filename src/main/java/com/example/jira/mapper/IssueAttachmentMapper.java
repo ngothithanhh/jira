@@ -12,7 +12,7 @@ public class IssueAttachmentMapper {
         if (attachment.getIssue() != null) {
             res.setIssueId(attachment.getIssue().getIssueId());
         }
-        res.setFilePath(attachment.getFilePath());
+        res.setFilePath("/api/issues/attachments/" + attachment.getAttachmentId() + "/download");
         
         if (attachment.getUser() != null) {
             res.setUploadedByUserId(attachment.getUser().getUserId());

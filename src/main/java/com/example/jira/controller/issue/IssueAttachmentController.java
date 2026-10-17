@@ -29,6 +29,16 @@ public class IssueAttachmentController {
         return ResponseEntity.ok(attachmentService.getAttachments(issueId));
     }
 
+    @GetMapping("/attachments/{attachmentId}/download")
+    public ResponseEntity<byte[]> download(@PathVariable int attachmentId) {
+        return ResponseEntity.ok()
+                .contentType(org.springframework.http.MediaType.APPLICATION_OCTET_STREAM)
+                .header("Content-Disposition", "attachment; filename=attachment-" + attachmentId)
+                .header("X-Content-Type-Options", "nosniff")
+                .header("Cache-Control", "no-store")
+                .body(attachmentService.downloadAttachment(attachmentId));
+    }
+
     @DeleteMapping("/attachments/{attachmentId}")
     public ResponseEntity<Void> deleteAttachment(@PathVariable int attachmentId) {
         attachmentService.deleteAttachment(attachmentId);
