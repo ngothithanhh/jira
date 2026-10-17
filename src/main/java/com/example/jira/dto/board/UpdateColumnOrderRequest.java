@@ -1,5 +1,6 @@
 package com.example.jira.dto.board;
 
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -15,5 +16,6 @@ public class UpdateColumnOrderRequest {
     private Integer columnId;
 
     @NotNull(message = "Position (vị trí mới) không được để trống")
+    @Min(0)
     private Integer position;
 }

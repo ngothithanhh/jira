@@ -32,6 +32,7 @@ import com.example.jira.enums.SprintState;
 @Service
 @RequiredArgsConstructor
 public class IssueServiceImpl implements IssueService {
+    private final BoardIssueRepository boardIssueRepository;
     private final ProjectSecurity projectSecurity;
     private final ProjectRepository projectRepository;
     private final IssueTypeRepository issueTypeRepository;
@@ -169,7 +170,7 @@ public class IssueServiceImpl implements IssueService {
     @Override
     @Transactional
     public IssueResponse changeIssueStatus(int issueId, int statusId) {
-        Issue issue = getActiveIssueOrThrow(issueId);
+        Issue issue = issueRepository.findLockedActiveById(issueId).orElseThrow();
 
         if (!projectSecurity.hasPermission(issue.getProject().getProjectId(), PermissionName.EDIT_ISSUE)) {
             throw new RuntimeException("Bạn không có quyền thay đổi trạng thái công việc này!");
@@ -182,6 +183,7 @@ public class IssueServiceImpl implements IssueService {
             return IssueMapper.toResponse(issue); 
         }
 
+        if (boardIssueRepository.existsByIssue_IssueId(issueId)) throw new RuntimeException("Use board move API for a board issue");
         if (!workflowRuleRepository.existsByProject_ProjectIdAndFromStatus_StatusIdAndToStatus_StatusId(
                 issue.getProject().getProjectId(), issue.getStatus().getStatusId(), statusId)) {
             throw new RuntimeException("Chuyển đổi trạng thái không hợp lệ theo quy trình (Workflow)!");

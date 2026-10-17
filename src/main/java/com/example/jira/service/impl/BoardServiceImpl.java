@@ -23,6 +23,12 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class BoardServiceImpl implements BoardService {
 
+    private final BoardIssueRepository boardIssueRepository;
+    private final IssueRepository issueRepository;
+    private final WorkflowRuleRepository workflowRuleRepository;
+    private final IssueTransitionRepository issueTransitionRepository;
+    private final UserRepository userRepository;
+    private final com.example.jira.service.AuditLogService auditLogService;
     private final BoardRepository boardRepository;
     private final ProjectRepository projectRepository;
     private final BoardColumnRepository boardColumnRepository;
@@ -72,7 +78,7 @@ public class BoardServiceImpl implements BoardService {
         }
 
         List<BoardColumn> columns = boardColumnRepository.findByBoard_BoardIdOrderByPositionAsc(boardId);
-        return BoardMapper.toResponse(board, columns);
+        return response(board, columns);
     }
 
     @Override
@@ -84,7 +90,7 @@ public class BoardServiceImpl implements BoardService {
         return boardRepository.findByProject_ProjectId(projectId).stream()
                 .map(board -> {
                     List<BoardColumn> columns = boardColumnRepository.findByBoard_BoardIdOrderByPositionAsc(board.getBoardId());
-                    return BoardMapper.toResponse(board, columns);
+                    return response(board, columns);
                 })
                 .collect(Collectors.toList());
     }
@@ -92,7 +98,7 @@ public class BoardServiceImpl implements BoardService {
     @Override
     @Transactional
     public BoardResponse addColumn(CreateColumnRequest request) {
-        Board board = boardRepository.findById(request.getBoardId()).orElseThrow(() -> new RuntimeException("Không tìm thấy bảng"));
+        Board board = lockedBoard(request.getBoardId(), PermissionName.MANAGE_BOARD);
         if (!projectSecurity.hasPermission(board.getProject().getProjectId(), PermissionName.MANAGE_BOARD)) {
             throw new RuntimeException("Không có quyền thực hiện");
         }
@@ -116,6 +122,7 @@ public class BoardServiceImpl implements BoardService {
             throw new RuntimeException("Không có quyền thực hiện");
         }
         
+        lockedBoard(column.getBoard().getBoardId(), PermissionName.MANAGE_BOARD);
         IssueStatus status = issueStatusRepository.findById(statusId).orElseThrow(() -> new RuntimeException("Không tìm thấy trạng thái"));
 
         BoardColumnStatus bcs = new BoardColumnStatus();
@@ -129,11 +136,14 @@ public class BoardServiceImpl implements BoardService {
     @Override
     @Transactional
     public void updateColumnOrder(int boardId, List<UpdateColumnOrderRequest> requests) {
-        Board board = boardRepository.findById(boardId).orElseThrow(() -> new RuntimeException("Không tìm thấy bảng"));
+        Board board = lockedBoard(boardId, PermissionName.MANAGE_BOARD);
         if (!projectSecurity.hasPermission(board.getProject().getProjectId(), PermissionName.MANAGE_BOARD)) {
             throw new RuntimeException("Không có quyền thực hiện");
         }
 
+        if (requests == null || requests.stream().anyMatch(r -> r == null || r.getPosition() == null || r.getPosition() < 0)
+                || requests.stream().map(UpdateColumnOrderRequest::getColumnId).distinct().count() != requests.size())
+            throw new RuntimeException("Invalid column order");
         for (UpdateColumnOrderRequest request : requests) {
             BoardColumn column = boardColumnRepository.findById(request.getColumnId())
                     .orElseThrow(() -> new RuntimeException("Không tìm thấy cột với ID: " + request.getColumnId()));
@@ -156,10 +166,117 @@ public class BoardServiceImpl implements BoardService {
             throw new RuntimeException("Không có quyền thực hiện");
         }
 
+        lockedBoard(column.getBoard().getBoardId(), PermissionName.MANAGE_BOARD);
+        if (boardIssueRepository.findByBoard_BoardIdOrderByPositionAsc(column.getBoard().getBoardId()).stream()
+                .anyMatch(bi -> bi.getColumn().getColumnId() == columnId && bi.getIssue().getStatus().getStatusId() == statusId))
+            throw new RuntimeException("Status mapping is in use by board issues");
         BoardColumnStatusId id = new BoardColumnStatusId(columnId, statusId);
         BoardColumnStatus bcs = boardColumnStatusRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Trạng thái này chưa được ánh xạ vào cột"));
 
         boardColumnStatusRepository.delete(bcs);
+    }
+
+    private Board lockedBoard(int id, PermissionName permission) {
+        Board board = boardRepository.findLockedById(id).orElseThrow(() -> new RuntimeException("Board not found"));
+        if (!projectSecurity.hasPermission(board.getProject().getProjectId(), permission)) throw new RuntimeException("Permission denied");
+        return board;
+    }
+    private BoardResponse response(Board board, List<BoardColumn> columns) {
+        BoardResponse result = BoardMapper.toResponse(board, columns);
+        for (BoardIssue bi : boardIssueRepository.findByBoard_BoardIdOrderByPositionAsc(board.getBoardId())) {
+            if (bi.getIssue().getDeletedAt() != null) continue;
+            BoardResponse.BoardIssueDto item = new BoardResponse.BoardIssueDto();
+            item.setPosition(bi.getPosition()); item.setIssue(com.example.jira.mapper.IssueMapper.toResponse(bi.getIssue()));
+            result.getColumns().stream().filter(c -> c.getColumnId() == bi.getColumn().getColumnId()).findFirst().orElseThrow().getIssues().add(item);
+        }
+        return result;
+    }
+    @Override @Transactional
+    public BoardResponse updateBoard(int id, com.example.jira.dto.board.UpdateBoardRequest request) {
+        Board board = lockedBoard(id, PermissionName.MANAGE_BOARD);
+        board.setBoardName(request.getBoardName()); board.setBoardType(request.getBoardType()); return getBoard(id);
+    }
+    @Override @Transactional
+    public void deleteBoard(int id) {
+        Board board = lockedBoard(id, PermissionName.MANAGE_BOARD);
+        boardIssueRepository.deleteByBoard_BoardId(id);
+        boardIssueRepository.flush();
+        for (BoardColumn column : boardColumnRepository.findByBoard_BoardIdOrderByPositionAsc(id)) {
+            if (column.getBoardColumnStatuses() != null) boardColumnStatusRepository.deleteAll(column.getBoardColumnStatuses());
+            boardColumnRepository.delete(column);
+        }
+        boardRepository.delete(board);
+    }
+    @Override @Transactional
+    public BoardResponse updateColumn(int id, com.example.jira.dto.board.UpdateColumnRequest request) {
+        BoardColumn column = boardColumnRepository.findById(id).orElseThrow();
+        int boardId = column.getBoard().getBoardId(); lockedBoard(boardId, PermissionName.MANAGE_BOARD);
+        long count = boardIssueRepository.findByBoard_BoardIdOrderByPositionAsc(boardId).stream()
+                .filter(b -> b.getColumn().getColumnId() == id && b.getIssue().getDeletedAt() == null).count();
+        if (request.getWipLimit() < 0 || (request.getWipLimit() > 0 && count > request.getWipLimit())) throw new RuntimeException("WIP below occupancy");
+        column.setColumnName(request.getColumnName()); column.setWipLimit(request.getWipLimit()); return getBoard(boardId);
+    }
+    @Override @Transactional
+    public void deleteColumn(int id) {
+        BoardColumn column = boardColumnRepository.findById(id).orElseThrow();
+        lockedBoard(column.getBoard().getBoardId(), PermissionName.MANAGE_BOARD);
+        if (boardIssueRepository.findByBoard_BoardIdOrderByPositionAsc(column.getBoard().getBoardId()).stream()
+                .anyMatch(b -> b.getColumn().getColumnId() == id)) throw new RuntimeException("Remove issues before deleting column");
+        if (column.getBoardColumnStatuses() != null) boardColumnStatusRepository.deleteAll(column.getBoardColumnStatuses());
+        boardColumnRepository.delete(column);
+    }
+    @Override @Transactional
+    public BoardResponse moveIssue(int boardId, int issueId, com.example.jira.dto.board.MoveBoardIssueRequest request, boolean adding) {
+        Issue issue = issueRepository.findLockedActiveById(issueId).orElseThrow(() -> new RuntimeException("Issue not found"));
+        Board board = lockedBoard(boardId, PermissionName.EDIT_ISSUE);
+        if (issue.getProject().getProjectId() != board.getProject().getProjectId()) throw new RuntimeException("Issue belongs to another project");
+        BoardColumn target = boardColumnRepository.findById(request.getColumnId()).orElseThrow();
+        if (target.getBoard().getBoardId() != boardId) throw new RuntimeException("Column belongs to another board");
+        if (!boardColumnStatusRepository.existsById(new BoardColumnStatusId(target.getColumnId(), request.getStatusId()))) throw new RuntimeException("Status not mapped to column");
+        List<BoardIssue> all = boardIssueRepository.findByBoard_BoardIdOrderByPositionAsc(boardId);
+        BoardIssue member = all.stream().filter(b -> b.getIssue().getIssueId() == issueId).findFirst().orElse(null);
+        if (adding == (member != null)) throw new RuntimeException(adding ? "Issue already on board" : "Issue not on board");
+        IssueStatus previous = issue.getStatus();
+        boolean changed = previous.getStatusId() != request.getStatusId();
+        if (changed && !workflowRuleRepository.existsByProject_ProjectIdAndFromStatus_StatusIdAndToStatus_StatusId(board.getProject().getProjectId(), previous.getStatusId(), request.getStatusId())) throw new RuntimeException("Workflow transition denied");
+        if (changed) for (BoardIssue other : boardIssueRepository.findByIssue_IssueId(issueId)) {
+            if (other.getBoard().getBoardId() != boardId) throw new RuntimeException("Status conflicts with column on another board");
+        }
+        int oldColumn = member == null ? 0 : member.getColumn().getColumnId();
+        int oldPosition = member == null ? -1 : member.getPosition();
+        List<BoardIssue> ordered = all.stream().filter(b -> b.getColumn().getColumnId() == target.getColumnId() && b.getIssue().getIssueId() != issueId).collect(Collectors.toCollection(ArrayList::new));
+        long occupancy = ordered.stream().filter(b -> b.getIssue().getDeletedAt() == null).count();
+        if (request.getPosition() < 0 || request.getPosition() > ordered.size()) throw new RuntimeException("Invalid position");
+        if (oldColumn != target.getColumnId() && target.getWipLimit() > 0 && occupancy >= target.getWipLimit()) throw new RuntimeException("WIP limit reached");
+        if (member == null) {
+            member = new BoardIssue(); member.setId(new BoardIssueId(boardId, issueId)); member.setBoard(board); member.setIssue(issue);
+        }
+        member.setColumn(target); ordered.add(request.getPosition(), member);
+        for (int i=0; i<ordered.size(); i++) ordered.get(i).setPosition(i);
+        boardIssueRepository.saveAll(ordered);
+        if (oldColumn != 0 && oldColumn != target.getColumnId()) normalize(all, oldColumn, issueId);
+        if (changed) {
+            IssueStatus status = issueStatusRepository.findById(request.getStatusId()).orElseThrow();
+            IssueTransition transition = new IssueTransition(); transition.setIssue(issue); transition.setFromStatus(previous); transition.setToStatus(status);
+            transition.setUser(userRepository.findById(com.example.jira.ultils.SecurityUtils.getCurrentUserId()).orElseThrow());
+            transition.setTransitionedAt(LocalDateTime.now()); issueTransitionRepository.save(transition); issue.setStatus(status);
+        }
+        issue.setUpdatedAt(LocalDateTime.now());
+        auditLogService.logAction("BOARD_ISSUE_MOVED", com.example.jira.enums.EntityType.ISSUE, issueId,
+                "board="+boardId+"; column="+oldColumn+"->"+target.getColumnId()+"; position="+oldPosition+"->"+request.getPosition()+"; status="+previous.getStatusId()+"->"+request.getStatusId());
+        return getBoard(boardId);
+    }
+    private void normalize(List<BoardIssue> all, int columnId, int excludedId) {
+        int position=0;
+        for (BoardIssue b : all) if (b.getColumn().getColumnId()==columnId && b.getIssue().getIssueId()!=excludedId) b.setPosition(position++);
+    }
+    @Override @Transactional
+    public void removeIssue(int boardId, int issueId) {
+        issueRepository.findLockedById(issueId).orElseThrow(); lockedBoard(boardId, PermissionName.EDIT_ISSUE);
+        BoardIssue member = boardIssueRepository.findById(new BoardIssueId(boardId, issueId)).orElseThrow();
+        int columnId=member.getColumn().getColumnId(); boardIssueRepository.delete(member);
+        normalize(boardIssueRepository.findByBoard_BoardIdOrderByPositionAsc(boardId), columnId, issueId);
+        auditLogService.logAction("BOARD_ISSUE_REMOVED", com.example.jira.enums.EntityType.ISSUE, issueId, "board="+boardId);
     }
 }

@@ -1,11 +1,14 @@
 package com.example.jira.repository;
 
 import com.example.jira.entity.Issue;
+import com.example.jira.enums.SprintState;
+import jakarta.persistence.LockModeType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -53,11 +56,17 @@ public interface IssueRepository extends JpaRepository<Issue,Integer> {
             ORDER BY i.backlogRank ASC NULLS LAST, i.issueId ASC
             """)
     List<Issue> findProductBacklog(@Param("projectId") int projectId,
-                                   @Param("openStates") java.util.Collection<com.example.jira.enums.SprintState> openStates);
+                                   @Param("openStates") java.util.Collection<SprintState> openStates);
 
     @Query("SELECT COALESCE(MAX(i.backlogRank), 0) FROM Issue i " +
            "WHERE i.project.projectId = :projectId AND i.deletedAt IS NULL")
     long findMaxBacklogRankByProjectId(@Param("projectId") int projectId);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select i from Issue i where i.issueId = :id and i.deletedAt is null")
+    Optional<Issue> findLockedActiveById(@Param("id") int id);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select i from Issue i where i.issueId = :id")
+    Optional<Issue> findLockedById(@Param("id") int id);
     boolean existsByIssueType_IssueTypeId(int id);
     boolean existsByProject_ProjectIdAndIssueType_IssueTypeId(int projectId, int issueTypeId);
     boolean existsByStatus_StatusId(int statusId);
