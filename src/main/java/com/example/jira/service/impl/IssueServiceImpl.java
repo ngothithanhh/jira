@@ -26,6 +26,8 @@ import org.springframework.data.domain.Sort;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
+import java.util.Comparator;
+import com.example.jira.enums.SprintState;
 
 @Service
 @RequiredArgsConstructor
@@ -71,7 +73,9 @@ public class IssueServiceImpl implements IssueService {
         issue.setDescription(request.getDescription());
         issue.setPriority(request.getPriority());
         issue.setDueDate(request.getDueDate());
-        issue.setBacklogRank(request.getBacklogRank());
+        issue.setBacklogRank(request.getBacklogRank() != null
+                ? request.getBacklogRank()
+                : issueRepository.findMaxBacklogRankByProjectId(project.getProjectId()) + 1024);
         issue.setBoardPosition(request.getBoardPosition());
 
         if (request.getParentIssueId() != null) {
@@ -274,6 +278,50 @@ public class IssueServiceImpl implements IssueService {
                         .transitionedAt(transition.getTransitionedAt())
                         .build())
                 .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<IssueResponse> getProductBacklog(int projectId) {
+        if (!projectSecurity.hasPermission(projectId, PermissionName.VIEW_PROJECT)) {
+            throw new RuntimeException("Bạn không có quyền xem backlog của dự án này!");
+        }
+        return issueRepository.findProductBacklog(projectId, List.of(SprintState.FUTURE, SprintState.ACTIVE))
+                .stream().map(IssueMapper::toResponse).toList();
+    }
+
+    @Override
+    @Transactional
+    public void rankBacklogIssue(int projectId, int issueId, Integer beforeIssueId) {
+        if (!projectSecurity.hasPermission(projectId, PermissionName.MANAGE_SPRINT)) {
+            throw new RuntimeException("Bạn không có quyền sắp xếp backlog của dự án này!");
+        }
+        Issue issue = getActiveIssueOrThrow(issueId);
+        if (issue.getProject().getProjectId() != projectId) {
+            throw new RuntimeException("Issue phải thuộc cùng dự án!");
+        }
+        List<Issue> backlog = issueRepository.findProductBacklog(projectId, List.of(SprintState.FUTURE, SprintState.ACTIVE))
+                .stream().sorted(Comparator.comparing(Issue::getBacklogRank,
+                        Comparator.nullsLast(Long::compareTo)).thenComparing(Issue::getIssueId)).toList();
+        if (backlog.stream().noneMatch(i -> i.getIssueId() == issueId)) {
+            throw new RuntimeException("Chỉ có thể sắp xếp issue trong product backlog!");
+        }
+        if (beforeIssueId != null && beforeIssueId == issueId) {
+            return;
+        }
+        java.util.ArrayList<Issue> reordered = new java.util.ArrayList<>(backlog);
+        reordered.removeIf(i -> i.getIssueId() == issueId);
+        if (beforeIssueId == null) reordered.add(issue);
+        else {
+            int index = -1;
+            for (int i = 0; i < reordered.size(); i++) if (reordered.get(i).getIssueId() == beforeIssueId) { index = i; break; }
+            if (index < 0) throw new RuntimeException("Issue đích phải thuộc product backlog cùng dự án!");
+            reordered.add(index, issue);
+        }
+        for (int i = 0; i < reordered.size(); i++) reordered.get(i).setBacklogRank((long) (i + 1) * 1024);
+        issueRepository.saveAll(reordered);
+        auditLogService.logAction("BACKLOG_RANK_CHANGED", EntityType.ISSUE, issueId,
+                "Sắp xếp lại backlog issue " + issue.getIssueKey() + " trong project " + issue.getProject().getProjectKey());
     }
 
     @Override

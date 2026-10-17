@@ -5,8 +5,10 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import com.example.jira.enums.SprintState;
 
 @Repository
 public interface SprintRepository extends JpaRepository<Sprint, Integer> {
     List<Sprint> findByProject_ProjectId(int projectId);
+    boolean existsByProject_ProjectIdAndState(int projectId, SprintState state);
 }

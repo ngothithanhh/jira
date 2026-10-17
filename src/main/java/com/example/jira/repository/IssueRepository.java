@@ -41,6 +41,23 @@ public interface IssueRepository extends JpaRepository<Issue,Integer> {
                                    @Param("assigneeId") Integer assigneeId,
                                    @Param("issueTypeId") Integer issueTypeId,
                                    Pageable pageable);
+
+    @Query("""
+            SELECT i FROM Issue i
+            WHERE i.project.projectId = :projectId
+              AND i.deletedAt IS NULL
+              AND NOT EXISTS (
+                SELECT si FROM SprintIssue si
+                WHERE si.issue = i AND si.sprint.state IN :openStates
+              )
+            ORDER BY i.backlogRank ASC NULLS LAST, i.issueId ASC
+            """)
+    List<Issue> findProductBacklog(@Param("projectId") int projectId,
+                                   @Param("openStates") java.util.Collection<com.example.jira.enums.SprintState> openStates);
+
+    @Query("SELECT COALESCE(MAX(i.backlogRank), 0) FROM Issue i " +
+           "WHERE i.project.projectId = :projectId AND i.deletedAt IS NULL")
+    long findMaxBacklogRankByProjectId(@Param("projectId") int projectId);
     boolean existsByIssueType_IssueTypeId(int id);
     boolean existsByProject_ProjectIdAndIssueType_IssueTypeId(int projectId, int issueTypeId);
     boolean existsByStatus_StatusId(int statusId);

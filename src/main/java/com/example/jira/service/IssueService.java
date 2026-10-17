@@ -20,6 +20,8 @@ public interface IssueService {
                                      Integer issueTypeId, int page, int size, String sort);
     IssueResponse getIssue(int issueId);
     List<IssueTransitionResponse> getIssueTransitions(int issueId);
+    List<IssueResponse> getProductBacklog(int projectId);
+    void rankBacklogIssue(int projectId, int issueId, Integer beforeIssueId);
     void deleteIssue(int issueId);
 
 }
