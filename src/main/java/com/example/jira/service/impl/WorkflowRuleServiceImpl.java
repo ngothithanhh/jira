@@ -51,7 +51,7 @@ public class WorkflowRuleServiceImpl implements WorkflowRuleService {
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy trạng thái đích!"));
 
         Project project = projectRepository.findById(projectId)
-                .orElseThrow(() -> new RuntimeException("Project not found"));
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy dự án"));
 
         WorkflowRule rule = new WorkflowRule();
         rule.setProject(project);
@@ -67,7 +67,7 @@ public class WorkflowRuleServiceImpl implements WorkflowRuleService {
         WorkflowRule rule = workflowRuleRepository.findById(ruleId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy quy tắc!"));
         if (rule.getProject().getProjectId() != projectId) {
-            throw new RuntimeException("Workflow rule does not belong to this project");
+            throw new RuntimeException("Quy tắc quy trình không thuộc dự án này");
         }
         workflowRuleRepository.delete(rule);
     }
@@ -83,7 +83,7 @@ public class WorkflowRuleServiceImpl implements WorkflowRuleService {
 
     private void requirePermission(int projectId, PermissionName permission) {
         if (!projectSecurity.hasPermission(projectId, permission)) {
-            throw new RuntimeException("Bạn không có quyền thao tác workflow trong dự án này!");
+            throw new RuntimeException("Bạn không có quyền thay đổi quy trình trong dự án này!");
         }
     }
 }

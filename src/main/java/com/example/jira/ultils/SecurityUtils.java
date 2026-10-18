@@ -11,7 +11,7 @@ public class SecurityUtils {
         if (principal instanceof UserPrincipal) {
             return ((UserPrincipal) principal).getId();
         }
-        throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Unauthorized");
+        throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Vui lòng đăng nhập để tiếp tục");
     }
 
     public static String getCurrentUserEmail() {
@@ -19,6 +19,6 @@ public class SecurityUtils {
         if (principal instanceof UserPrincipal) {
             return ((UserPrincipal) principal).getUsername();
         }
-        throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Unauthorized");
+        throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Vui lòng đăng nhập để tiếp tục");
     }
 }

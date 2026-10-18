@@ -64,12 +64,12 @@ public class WorkLogService {
 
     private WorkLog find(int issueId, int id) {
         return logs.findByWorklogIdAndIssue_IssueId(id, issueId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Worklog not found"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy bản ghi thời gian làm việc"));
     }
     private void apply(WorkLog log, WorkLogRequest request) {
         if (request.timeSpent() < 1 || request.loggedAt() == null || request.loggedAt().isAfter(java.time.LocalDateTime.now())
                 || (request.comment() != null && request.comment().length() > 255))
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid worklog");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Thông tin ghi nhận thời gian làm việc không hợp lệ");
         log.setTimeSpent(request.timeSpent());
         log.setComment(request.comment());
         log.setLoggedAt(request.loggedAt());

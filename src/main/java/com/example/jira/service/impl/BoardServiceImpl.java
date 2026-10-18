@@ -143,7 +143,7 @@ public class BoardServiceImpl implements BoardService {
 
         if (requests == null || requests.stream().anyMatch(r -> r == null || r.getPosition() == null || r.getPosition() < 0)
                 || requests.stream().map(UpdateColumnOrderRequest::getColumnId).distinct().count() != requests.size())
-            throw new RuntimeException("Invalid column order");
+            throw new RuntimeException("Thứ tự cột không hợp lệ");
         for (UpdateColumnOrderRequest request : requests) {
             BoardColumn column = boardColumnRepository.findById(request.getColumnId())
                     .orElseThrow(() -> new RuntimeException("Không tìm thấy cột với ID: " + request.getColumnId()));
@@ -169,7 +169,7 @@ public class BoardServiceImpl implements BoardService {
         lockedBoard(column.getBoard().getBoardId(), PermissionName.MANAGE_BOARD);
         if (boardIssueRepository.findByBoard_BoardIdOrderByPositionAsc(column.getBoard().getBoardId()).stream()
                 .anyMatch(bi -> bi.getColumn().getColumnId() == columnId && bi.getIssue().getStatus().getStatusId() == statusId))
-            throw new RuntimeException("Status mapping is in use by board issues");
+            throw new RuntimeException("Liên kết trạng thái đang được sử dụng bởi công việc trên bảng");
         BoardColumnStatusId id = new BoardColumnStatusId(columnId, statusId);
         BoardColumnStatus bcs = boardColumnStatusRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Trạng thái này chưa được ánh xạ vào cột"));
@@ -178,8 +178,8 @@ public class BoardServiceImpl implements BoardService {
     }
 
     private Board lockedBoard(int id, PermissionName permission) {
-        Board board = boardRepository.findLockedById(id).orElseThrow(() -> new RuntimeException("Board not found"));
-        if (!projectSecurity.hasPermission(board.getProject().getProjectId(), permission)) throw new RuntimeException("Permission denied");
+        Board board = boardRepository.findLockedById(id).orElseThrow(() -> new RuntimeException("Không tìm thấy bảng công việc"));
+        if (!projectSecurity.hasPermission(board.getProject().getProjectId(), permission)) throw new RuntimeException("Bạn không có quyền thực hiện thao tác này");
         return board;
     }
     private BoardResponse response(Board board, List<BoardColumn> columns) {
@@ -214,7 +214,7 @@ public class BoardServiceImpl implements BoardService {
         int boardId = column.getBoard().getBoardId(); lockedBoard(boardId, PermissionName.MANAGE_BOARD);
         long count = boardIssueRepository.findByBoard_BoardIdOrderByPositionAsc(boardId).stream()
                 .filter(b -> b.getColumn().getColumnId() == id && b.getIssue().getDeletedAt() == null).count();
-        if (request.getWipLimit() < 0 || (request.getWipLimit() > 0 && count > request.getWipLimit())) throw new RuntimeException("WIP below occupancy");
+        if (request.getWipLimit() < 0 || (request.getWipLimit() > 0 && count > request.getWipLimit())) throw new RuntimeException("Giới hạn công việc đang thực hiện nhỏ hơn số công việc hiện có");
         column.setColumnName(request.getColumnName()); column.setWipLimit(request.getWipLimit()); return getBoard(boardId);
     }
     @Override @Transactional
@@ -222,33 +222,33 @@ public class BoardServiceImpl implements BoardService {
         BoardColumn column = boardColumnRepository.findById(id).orElseThrow();
         lockedBoard(column.getBoard().getBoardId(), PermissionName.MANAGE_BOARD);
         if (boardIssueRepository.findByBoard_BoardIdOrderByPositionAsc(column.getBoard().getBoardId()).stream()
-                .anyMatch(b -> b.getColumn().getColumnId() == id)) throw new RuntimeException("Remove issues before deleting column");
+                .anyMatch(b -> b.getColumn().getColumnId() == id)) throw new RuntimeException("Vui lòng di chuyển công việc khỏi cột trước khi xóa");
         if (column.getBoardColumnStatuses() != null) boardColumnStatusRepository.deleteAll(column.getBoardColumnStatuses());
         boardColumnRepository.delete(column);
     }
     @Override @Transactional
     public BoardResponse moveIssue(int boardId, int issueId, com.example.jira.dto.board.MoveBoardIssueRequest request, boolean adding) {
-        Issue issue = issueRepository.findLockedActiveById(issueId).orElseThrow(() -> new RuntimeException("Issue not found"));
+        Issue issue = issueRepository.findLockedActiveById(issueId).orElseThrow(() -> new RuntimeException("Không tìm thấy công việc"));
         Board board = lockedBoard(boardId, PermissionName.EDIT_ISSUE);
-        if (issue.getProject().getProjectId() != board.getProject().getProjectId()) throw new RuntimeException("Issue belongs to another project");
+        if (issue.getProject().getProjectId() != board.getProject().getProjectId()) throw new RuntimeException("Công việc thuộc dự án khác");
         BoardColumn target = boardColumnRepository.findById(request.getColumnId()).orElseThrow();
-        if (target.getBoard().getBoardId() != boardId) throw new RuntimeException("Column belongs to another board");
-        if (!boardColumnStatusRepository.existsById(new BoardColumnStatusId(target.getColumnId(), request.getStatusId()))) throw new RuntimeException("Status not mapped to column");
+        if (target.getBoard().getBoardId() != boardId) throw new RuntimeException("Cột thuộc bảng công việc khác");
+        if (!boardColumnStatusRepository.existsById(new BoardColumnStatusId(target.getColumnId(), request.getStatusId()))) throw new RuntimeException("Trạng thái chưa được liên kết với cột này");
         List<BoardIssue> all = boardIssueRepository.findByBoard_BoardIdOrderByPositionAsc(boardId);
         BoardIssue member = all.stream().filter(b -> b.getIssue().getIssueId() == issueId).findFirst().orElse(null);
-        if (adding == (member != null)) throw new RuntimeException(adding ? "Issue already on board" : "Issue not on board");
+        if (adding == (member != null)) throw new RuntimeException(adding ? "Công việc đã có trên bảng" : "Công việc không có trên bảng");
         IssueStatus previous = issue.getStatus();
         boolean changed = previous.getStatusId() != request.getStatusId();
-        if (changed && !workflowRuleRepository.existsByProject_ProjectIdAndFromStatus_StatusIdAndToStatus_StatusId(board.getProject().getProjectId(), previous.getStatusId(), request.getStatusId())) throw new RuntimeException("Workflow transition denied");
+        if (changed && !workflowRuleRepository.existsByProject_ProjectIdAndFromStatus_StatusIdAndToStatus_StatusId(board.getProject().getProjectId(), previous.getStatusId(), request.getStatusId())) throw new RuntimeException("Quy trình không cho phép chuyển sang trạng thái này");
         if (changed) for (BoardIssue other : boardIssueRepository.findByIssue_IssueId(issueId)) {
-            if (other.getBoard().getBoardId() != boardId) throw new RuntimeException("Status conflicts with column on another board");
+            if (other.getBoard().getBoardId() != boardId) throw new RuntimeException("Trạng thái xung đột với cột trên bảng công việc khác");
         }
         int oldColumn = member == null ? 0 : member.getColumn().getColumnId();
         int oldPosition = member == null ? -1 : member.getPosition();
         List<BoardIssue> ordered = all.stream().filter(b -> b.getColumn().getColumnId() == target.getColumnId() && b.getIssue().getIssueId() != issueId).collect(Collectors.toCollection(ArrayList::new));
         long occupancy = ordered.stream().filter(b -> b.getIssue().getDeletedAt() == null).count();
-        if (request.getPosition() < 0 || request.getPosition() > ordered.size()) throw new RuntimeException("Invalid position");
-        if (oldColumn != target.getColumnId() && target.getWipLimit() > 0 && occupancy >= target.getWipLimit()) throw new RuntimeException("WIP limit reached");
+        if (request.getPosition() < 0 || request.getPosition() > ordered.size()) throw new RuntimeException("Vị trí không hợp lệ");
+        if (oldColumn != target.getColumnId() && target.getWipLimit() > 0 && occupancy >= target.getWipLimit()) throw new RuntimeException("Đã đạt giới hạn công việc đang thực hiện của cột");
         if (member == null) {
             member = new BoardIssue(); member.setId(new BoardIssueId(boardId, issueId)); member.setBoard(board); member.setIssue(issue);
         }

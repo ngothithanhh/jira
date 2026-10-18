@@ -63,7 +63,7 @@ public class SprintServiceImpl implements SprintService {
     public SprintResponse getSprint(int sprintId) {
         Sprint sprint = sprintRepository.findById(sprintId).orElseThrow(() -> new RuntimeException("Không tìm thấy sprint"));
         if (!projectSecurity.hasPermission(sprint.getProject().getProjectId(), PermissionName.VIEW_PROJECT)) {
-            throw new RuntimeException("Bạn không có quyền xem sprint này");
+            throw new RuntimeException("Bạn không có quyền xem đợt làm việc này");
         }
         return SprintMapper.toResponse(sprint);
     }
@@ -99,7 +99,7 @@ public class SprintServiceImpl implements SprintService {
     @Transactional(readOnly = true)
     public List<SprintResponse> getSprintsByProject(int projectId) {
         if (!projectSecurity.hasPermission(projectId, PermissionName.VIEW_PROJECT)) {
-            throw new RuntimeException("Bạn không có quyền xem sprint của dự án này");
+            throw new RuntimeException("Bạn không có quyền xem đợt làm việc của dự án này");
         }
         return sprintRepository.findByProject_ProjectId(projectId).stream()
                 .map(SprintMapper::toResponse)
@@ -111,7 +111,7 @@ public class SprintServiceImpl implements SprintService {
     public List<IssueResponse> getSprintBacklog(int sprintId) {
         Sprint sprint = sprintRepository.findById(sprintId).orElseThrow(() -> new RuntimeException("Không tìm thấy sprint"));
         if (!projectSecurity.hasPermission(sprint.getProject().getProjectId(), PermissionName.VIEW_PROJECT)) {
-            throw new RuntimeException("Bạn không có quyền xem sprint này");
+            throw new RuntimeException("Bạn không có quyền xem đợt làm việc này");
         }
         return sprintIssueRepository.findBySprint_SprintIdOrderByIssue_BacklogRankAscIssue_IssueIdAsc(sprintId).stream()
                 .map(SprintIssue::getIssue).map(IssueMapper::toResponse).toList();
@@ -125,10 +125,10 @@ public class SprintServiceImpl implements SprintService {
         Issue issue = issueRepository.findByIssueIdAndDeletedAtIsNull(issueId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy issue"));
         if (issue.getProject().getProjectId() != sprint.getProject().getProjectId()) {
-            throw new RuntimeException("Issue phải thuộc cùng dự án");
+            throw new RuntimeException("Công việc phải thuộc cùng dự án");
         }
         if (sprintIssueRepository.existsOpenSprintMembership(issueId, List.of(SprintState.FUTURE, SprintState.ACTIVE))) {
-            throw new RuntimeException("Issue đã thuộc một sprint chưa đóng");
+            throw new RuntimeException("Công việc đã thuộc một đợt làm việc chưa đóng");
         }
 
         SprintIssue sprintIssue = new SprintIssue();
@@ -148,7 +148,7 @@ public class SprintServiceImpl implements SprintService {
         Sprint sprint = getManageableSprint(sprintId);
         requireFuture(sprint, "Chỉ có thể gỡ issue khỏi sprint chưa bắt đầu");
         if (!sprintIssueRepository.existsBySprint_SprintIdAndIssue_IssueId(sprintId, issueId)) {
-            throw new RuntimeException("Issue không thuộc sprint này");
+            throw new RuntimeException("Công việc không thuộc đợt làm việc này");
         }
         sprintIssueRepository.deleteBySprint_SprintIdAndIssue_IssueId(sprintId, issueId);
         auditLogService.logAction("ISSUE_REMOVED_FROM_SPRINT", EntityType.ISSUE, issueId,
@@ -161,7 +161,7 @@ public class SprintServiceImpl implements SprintService {
         Sprint sprint = getManageableSprint(sprintId);
         requireFuture(sprint, "Chỉ có thể bắt đầu sprint chưa bắt đầu");
         if (sprintRepository.existsByProject_ProjectIdAndState(sprint.getProject().getProjectId(), SprintState.ACTIVE)) {
-            throw new RuntimeException("Project đã có sprint đang hoạt động");
+            throw new RuntimeException("Dự án đã có đợt làm việc đang hoạt động");
         }
         sprint.setState(SprintState.ACTIVE);
         sprintRepository.save(sprint);
@@ -174,17 +174,17 @@ public class SprintServiceImpl implements SprintService {
     public void completeSprint(int sprintId, Integer moveToSprintId) {
         Sprint sprint = getManageableSprint(sprintId);
         if (sprint.getState() != SprintState.ACTIVE) {
-            throw new RuntimeException("Chỉ có thể hoàn tất sprint đang hoạt động");
+            throw new RuntimeException("Chỉ có thể hoàn tất đợt làm việc đang hoạt động");
         }
 
         Sprint nextSprint = null;
         if (moveToSprintId != null) {
             nextSprint = sprintRepository.findById(moveToSprintId).orElseThrow(() -> new RuntimeException("Không tìm thấy sprint đích"));
             if (nextSprint.getProject().getProjectId() != sprint.getProject().getProjectId()) {
-                throw new RuntimeException("Sprint đích phải thuộc cùng dự án");
+                throw new RuntimeException("Đợt làm việc đích phải thuộc cùng dự án");
             }
             if (nextSprint.getState() != SprintState.FUTURE) {
-                throw new RuntimeException("Sprint đích phải ở trạng thái chưa bắt đầu");
+                throw new RuntimeException("Đợt làm việc đích phải ở trạng thái chưa bắt đầu");
             }
         }
 

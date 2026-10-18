@@ -34,7 +34,7 @@ public class ProjectVersionService {
     }
     private void check(int projectId, boolean edit) {
         if (!security.hasPermission(projectId, edit ? PermissionName.UPDATE_PROJECT : PermissionName.VIEW_PROJECT))
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Project permission denied");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Bạn không có quyền thực hiện thao tác trong dự án này");
     }
     private ProjectVersion load(int id, boolean edit) {
         ProjectVersion v = versions.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
@@ -62,7 +62,7 @@ public class ProjectVersionService {
     public void attach(int id, int issueId, boolean remove) {
         ProjectVersion v = load(id, true);
         Issue issue = issues.findByIssueIdAndDeletedAtIsNull(issueId).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
-        if (issue.getProject().getProjectId() != v.getProject().getProjectId()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Issue must belong to version project");
+        if (issue.getProject().getProjectId() != v.getProject().getProjectId()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Công việc phải thuộc cùng dự án với phiên bản");
         IssueVersionId key = new IssueVersionId(issueId, id);
         if (remove) links.deleteById(key);
         else if (!links.existsById(key)) { IssueVersion link = new IssueVersion(); link.setId(key); link.setIssue(issue); link.setProjectVersion(v); links.save(link); }

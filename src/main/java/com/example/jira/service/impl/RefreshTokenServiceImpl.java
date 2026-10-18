@@ -39,10 +39,10 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
 
         if(token.isRevoked()){
             revokeFamily(token.getFamilyId());
-            throw new RuntimeException("Refresh token reuse detected");
+            throw new RuntimeException("Phát hiện mã làm mới phiên đăng nhập bị tái sử dụng. Vui lòng đăng nhập lại.");
         }
         if(token.getExpiresAt().isBefore(LocalDateTime.now())){
-            throw new RuntimeException("Refresh token expired");
+            throw new RuntimeException("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
         }
 
         token.setLastUsedAt(LocalDateTime.now());

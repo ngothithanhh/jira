@@ -25,7 +25,7 @@ public class ScrumReportService {
     public record BurnPoint(LocalDate date, int remainingStoryPoints, int totalStoryPoints) {}
     public record Row(int issueId, String issueKey, String summary, Integer assigneeId, Integer statusId, int storyPoints) {}
     private void check(int projectId) {
-        if (!security.hasPermission(projectId, PermissionName.VIEW_PROJECT)) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Project permission denied");
+        if (!security.hasPermission(projectId, PermissionName.VIEW_PROJECT)) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Bạn không có quyền thực hiện thao tác trong dự án này");
     }
     private Sprint sprint(int id) {
         Sprint s = sprints.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
@@ -48,11 +48,11 @@ public class ScrumReportService {
     }
     public List<BurnPoint> burndown(int id) {
         Sprint s = sprint(id);
-        if (s.getStartDate() == null || s.getEndDate() == null) throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "Sprint requires start and end dates");
+        if (s.getStartDate() == null || s.getEndDate() == null) throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "Vui lòng nhập ngày bắt đầu và ngày kết thúc của đợt làm việc");
         LocalDate end = s.getEndDate().toLocalDate();
         if (s.getCompletedAt() != null && s.getCompletedAt().toLocalDate().isBefore(end)) end = s.getCompletedAt().toLocalDate();
         if (LocalDate.now().isBefore(end)) end = LocalDate.now();
-        if (java.time.temporal.ChronoUnit.DAYS.between(s.getStartDate().toLocalDate(), end) > 3660) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Sprint date range too large");
+        if (java.time.temporal.ChronoUnit.DAYS.between(s.getStartDate().toLocalDate(), end) > 3660) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Khoảng thời gian của đợt làm việc quá dài");
         List<SprintIssue> rows = memberships.findBySprint_SprintId(id);
         Map<Integer,List<IssueTransition>> history = new HashMap<>();
         for (SprintIssue row : rows) history.put(row.getIssue().getIssueId(), transitions.findByIssue_IssueIdOrderByTransitionedAtDesc(row.getIssue().getIssueId()));
@@ -82,7 +82,7 @@ public class ScrumReportService {
         List<Issue> selected;
         if (sprintId != null) {
             Sprint s = sprint(sprintId);
-            if (s.getProject().getProjectId() != projectId) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Sprint belongs to another project");
+            if (s.getProject().getProjectId() != projectId) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Đợt làm việc thuộc dự án khác");
             selected = memberships.findBySprint_SprintId(sprintId).stream().map(SprintIssue::getIssue).toList();
         } else selected = issues.findByProject_ProjectIdAndDeletedAtIsNull(projectId);
         return selected.stream().filter(i -> i.getDeletedAt() == null)

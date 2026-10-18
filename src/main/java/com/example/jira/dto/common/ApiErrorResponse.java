@@ -20,7 +20,7 @@ public record ApiErrorResponse(
     }
 
     public static ApiErrorResponse validation(Map<String, String> fieldErrors) {
-        return ApiErrorResponse.builder().success(false).message("Validation failed").code("VALIDATION_ERROR")
+        return ApiErrorResponse.builder().success(false).message("Dữ liệu không hợp lệ. Vui lòng kiểm tra các trường thông tin.").code("VALIDATION_ERROR")
                 .timestamp(Instant.now()).fieldErrors(fieldErrors).build();
     }
 }

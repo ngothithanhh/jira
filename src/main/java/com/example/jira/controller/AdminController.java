@@ -58,13 +58,13 @@ public class AdminController {
     @PutMapping("/users/{id}")
     public UserView update(@PathVariable int id, @Valid @RequestBody UserUpdate request) {
         User u = load(id);
-        users.findByEmail(request.email()).filter(existing -> existing.getUserId() != id).ifPresent(existing -> { throw new ResponseStatusException(HttpStatus.CONFLICT, "Email already exists"); });
+        users.findByEmail(request.email()).filter(existing -> existing.getUserId() != id).ifPresent(existing -> { throw new ResponseStatusException(HttpStatus.CONFLICT, "Email đã tồn tại"); });
         u.setUserName(request.userName()); u.setEmail(request.email()); u.setFullName(request.fullName()); users.save(u);
         audit.logAction("USER_UPDATED", EntityType.USER, id, "Updated user profile"); return view(u);
     }
     @PutMapping("/users/{id}/lock")
     public UserView lock(@PathVariable int id, @RequestBody LockRequest request) {
-        if (request.locked() && id == SecurityUtils.getCurrentUserId()) throw new ResponseStatusException(HttpStatus.CONFLICT, "Cannot lock your own account");
+        if (request.locked() && id == SecurityUtils.getCurrentUserId()) throw new ResponseStatusException(HttpStatus.CONFLICT, "Bạn không thể khóa tài khoản của chính mình");
         User u = load(id); u.setLocked(request.locked()); users.save(u);
         audit.logAction(request.locked() ? "USER_LOCKED" : "USER_UNLOCKED", EntityType.USER, id, "Account lock changed"); return view(u);
     }
@@ -76,7 +76,7 @@ public class AdminController {
         @RequestParam(required=false) @DateTimeFormat(iso=DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
         @RequestParam(required=false) @DateTimeFormat(iso=DateTimeFormat.ISO.DATE_TIME) LocalDateTime to,
         @RequestParam(defaultValue="0") int page, @RequestParam(defaultValue="20") int size) {
-        if (from != null && to != null && from.isAfter(to)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid date range");
+        if (from != null && to != null && from.isAfter(to)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Khoảng thời gian không hợp lệ");
         Specification<AuditLog> filter = (root, query, cb) -> {
             java.util.List<jakarta.persistence.criteria.Predicate> predicates = new java.util.ArrayList<>();
             if (userId != null) predicates.add(cb.equal(root.get("user").get("userId"), userId));

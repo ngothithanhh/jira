@@ -51,11 +51,11 @@ public class IssueTypeServiceImpl implements IssueTypeService {
     public void deleteIssueType(int issueTypeId){
         boolean usedInProjects = projectIssueTypeRepository.existsByIssueType_IssueTypeId(issueTypeId);
         if (usedInProjects) {
-            throw new RuntimeException("Không thể xóa Issue Type này vì đang được cấu hình sử dụng trong một số dự án.");
+            throw new RuntimeException("Không thể xóa loại công việc này vì đang được sử dụng trong một số dự án.");
         }
         boolean hasIssues = issueRepository.existsByIssueType_IssueTypeId(issueTypeId);
         if (hasIssues) {
-            throw new RuntimeException("Không thể xóa vì đã có Task được tạo với Issue Type này.");
+            throw new RuntimeException("Không thể xóa vì đã có công việc sử dụng loại này.");
         }
         issueTypeRepository.deleteById(issueTypeId);
 

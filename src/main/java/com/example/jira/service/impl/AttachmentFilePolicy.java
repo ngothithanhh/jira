@@ -18,14 +18,14 @@ public final class AttachmentFilePolicy {
     private AttachmentFilePolicy() {}
 
     public static void validate(MultipartFile file) {
-        if (file == null || file.isEmpty()) reject(HttpStatus.BAD_REQUEST, "Empty file");
-        if (file.getSize() > MAX_BYTES) reject(HttpStatus.PAYLOAD_TOO_LARGE, "Maximum attachment size is 10 MiB");
+        if (file == null || file.isEmpty()) reject(HttpStatus.BAD_REQUEST, "Tệp đính kèm không được để trống");
+        if (file.getSize() > MAX_BYTES) reject(HttpStatus.PAYLOAD_TOO_LARGE, "Dung lượng tệp đính kèm tối đa là 10 MiB");
         String name = file.getOriginalFilename();
         if (name == null || name.contains("/") || name.contains("\\") || name.contains("\u0000") || name.length() > 255)
-            reject(HttpStatus.BAD_REQUEST, "Invalid filename");
+            reject(HttpStatus.BAD_REQUEST, "Tên tệp không hợp lệ");
         String extension = name.substring(name.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT);
         if (!TYPES.containsKey(extension) || !TYPES.get(extension).equalsIgnoreCase(file.getContentType()))
-            reject(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Unsupported attachment type");
+            reject(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Định dạng tệp đính kèm không được hỗ trợ");
         try (var input = file.getInputStream()) {
             byte[] header = input.readNBytes(512);
             boolean valid = switch (extension) {
@@ -35,9 +35,9 @@ public final class AttachmentFilePolicy {
                 case "docx", "xlsx" -> validOffice(file, extension);
                 default -> validText(file);
             };
-            if (!valid) reject(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "File content does not match its type");
+            if (!valid) reject(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Nội dung tệp không khớp với định dạng");
         } catch (IOException ex) {
-            reject(HttpStatus.BAD_REQUEST, "Cannot read attachment");
+            reject(HttpStatus.BAD_REQUEST, "Không thể đọc tệp đính kèm");
         }
     }
 

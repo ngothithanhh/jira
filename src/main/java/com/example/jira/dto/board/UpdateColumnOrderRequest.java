@@ -12,10 +12,10 @@ import lombok.Setter;
 @NoArgsConstructor
 @AllArgsConstructor
 public class UpdateColumnOrderRequest {
-    @NotNull(message = "Column ID không được để trống")
+    @NotNull(message = "Mã cột không được để trống")
     private Integer columnId;
 
-    @NotNull(message = "Position (vị trí mới) không được để trống")
+    @NotNull(message = "Vị trí mới không được để trống")
     @Min(0)
     private Integer position;
 }

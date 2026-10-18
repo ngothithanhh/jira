@@ -82,7 +82,7 @@ public class NotificationServiceImpl implements NotificationService {
     @Transactional(readOnly = true)
     public Page<NotificationResponse> getPage(boolean unreadOnly, int page, int size) {
         if (page < 0 || size < 1 || size > 100)
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid pagination (size 1..100)");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Thông tin phân trang không hợp lệ. Số bản ghi mỗi trang phải từ 1 đến 100.");
         var pageable = PageRequest.of(page, size,
                 Sort.by(Sort.Direction.DESC, "createdAt", "notificationId"));
         int userId = SecurityUtils.getCurrentUserId();

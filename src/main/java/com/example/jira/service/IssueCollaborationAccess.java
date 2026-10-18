@@ -18,15 +18,15 @@ public class IssueCollaborationAccess {
 
     public Issue requireView(int issueId) {
         Issue issue = issues.findByIssueIdAndDeletedAtIsNull(issueId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Issue not found"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy công việc"));
         if (!security.hasPermission(issue.getProject().getProjectId(), PermissionName.VIEW_PROJECT))
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Project access required");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Bạn không có quyền truy cập dự án này");
         return issue;
     }
 
     public void requireOwnerOrEditor(Issue issue, int ownerId) {
         if (ownerId != SecurityUtils.getCurrentUserId()
                 && !security.hasPermission(issue.getProject().getProjectId(), PermissionName.EDIT_ISSUE))
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Owner or issue editor required");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Bạn không có quyền chỉnh sửa nội dung này");
     }
 }

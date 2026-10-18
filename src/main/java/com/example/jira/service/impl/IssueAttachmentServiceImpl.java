@@ -40,7 +40,7 @@ public class IssueAttachmentServiceImpl implements IssueAttachmentService {
         Issue issue = access.requireView(issueId);
 
         if (!projectSecurity.hasPermission(issue.getProject().getProjectId(), PermissionName.EDIT_ISSUE)) {
-            throw new RuntimeException("Bạn không có quyền đính kèm file trong dự án này!");
+            throw new RuntimeException("Bạn không có quyền đính kèm tệp trong dự án này!");
         }
 
         AttachmentFilePolicy.validate(file);
@@ -61,7 +61,7 @@ public class IssueAttachmentServiceImpl implements IssueAttachmentService {
             return IssueAttachmentMapper.toResponse(saved);
 
         } catch (Exception e) {
-            throw new RuntimeException("Lỗi upload file: " + e.getMessage());
+            throw new RuntimeException("Lỗi tải tệp lên: " + e.getMessage());
         }
     }
 
@@ -88,7 +88,7 @@ public class IssueAttachmentServiceImpl implements IssueAttachmentService {
         access.requireView(attachment.getIssue().getIssueId());
         try { return cloudinaryService.downloadFile(attachment.getFilePath()); }
         catch (java.io.IOException ex) {
-            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_GATEWAY, "Attachment download failed", ex);
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_GATEWAY, "Không thể tải xuống tệp đính kèm", ex);
         }
     }
 
@@ -107,13 +107,13 @@ public class IssueAttachmentServiceImpl implements IssueAttachmentService {
 
         // Chỉ người tải lên hoặc có quyền EDIT_ISSUE mới được xóa
         if (attachment.getUser().getUserId() != userId && !projectSecurity.hasPermission(issue.getProject().getProjectId(), PermissionName.EDIT_ISSUE)) {
-             throw new RuntimeException("Bạn không có quyền xóa file này!");
+             throw new RuntimeException("Bạn không có quyền xóa tệp này!");
         }
 
         try {
             cloudinaryService.deleteFile(attachment.getFilePath());
         } catch (java.io.IOException e) {
-            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_GATEWAY, "Attachment storage deletion failed", e);
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_GATEWAY, "Không thể xóa tệp đính kèm khỏi kho lưu trữ", e);
         }
 
         audit.logAction("ATTACHMENT_DELETED", com.example.jira.enums.EntityType.ISSUE, issue.getIssueId(), "Attachment " + attachmentId);

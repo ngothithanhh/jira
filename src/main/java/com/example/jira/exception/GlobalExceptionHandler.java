@@ -29,9 +29,24 @@ import java.util.NoSuchElementException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    @ExceptionHandler(org.springframework.security.core.AuthenticationException.class)
+    public ResponseEntity<ApiErrorResponse> handleAuthentication(org.springframework.security.core.AuthenticationException exception) {
+        if (exception instanceof org.springframework.security.authentication.LockedException) {
+            return error(HttpStatus.UNAUTHORIZED, "Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên.", "ACCOUNT_LOCKED");
+        }
+        if (exception instanceof org.springframework.security.authentication.DisabledException) {
+            return error(HttpStatus.UNAUTHORIZED, "Tài khoản đã bị vô hiệu hóa. Vui lòng liên hệ quản trị viên.", "ACCOUNT_DISABLED");
+        }
+        if (exception instanceof org.springframework.security.authentication.BadCredentialsException
+                || exception instanceof org.springframework.security.core.userdetails.UsernameNotFoundException) {
+            return error(HttpStatus.UNAUTHORIZED, "Tên đăng nhập hoặc mật khẩu không đúng.", "INVALID_CREDENTIALS");
+        }
+        return error(HttpStatus.UNAUTHORIZED, "Không thể xác thực tài khoản. Vui lòng đăng nhập lại.", "UNAUTHORIZED");
+    }
+
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ApiErrorResponse> handleAccessDenied(org.springframework.security.access.AccessDeniedException exception) {
-        return error(HttpStatus.FORBIDDEN, "Permission denied", "FORBIDDEN");
+        return error(HttpStatus.FORBIDDEN, "Bạn không có quyền thực hiện thao tác này.", "FORBIDDEN");
     }
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiErrorResponse> handleValidation(MethodArgumentNotValidException exception) {
@@ -51,51 +66,49 @@ public class GlobalExceptionHandler {
             MissingServletRequestParameterException.class
     })
     public ResponseEntity<ApiErrorResponse> handleBadRequest(Exception exception) {
-        return ResponseEntity.badRequest().body(ApiErrorResponse.of("Request body or parameters are invalid", "BAD_REQUEST"));
+        return ResponseEntity.badRequest().body(ApiErrorResponse.of("Dữ liệu gửi lên không hợp lệ. Vui lòng kiểm tra lại.", "BAD_REQUEST"));
     }
 
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<ApiErrorResponse> handleMethodNotAllowed(HttpRequestMethodNotSupportedException exception) {
-        return error(HttpStatus.METHOD_NOT_ALLOWED, "The HTTP method is not supported for this endpoint", "METHOD_NOT_ALLOWED");
+        return error(HttpStatus.METHOD_NOT_ALLOWED, "Thao tác yêu cầu không được hỗ trợ", "METHOD_NOT_ALLOWED");
     }
 
     @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
     public ResponseEntity<ApiErrorResponse> handleUnsupportedMediaType(HttpMediaTypeNotSupportedException exception) {
-        return error(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "The request content type is not supported", "UNSUPPORTED_MEDIA_TYPE");
+        return error(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Định dạng dữ liệu gửi lên không được hỗ trợ", "UNSUPPORTED_MEDIA_TYPE");
     }
 
     @ExceptionHandler(HttpMediaTypeNotAcceptableException.class)
     public ResponseEntity<ApiErrorResponse> handleNotAcceptable(HttpMediaTypeNotAcceptableException exception) {
-        return error(HttpStatus.NOT_ACCEPTABLE, "The requested response format is not supported", "NOT_ACCEPTABLE");
+        return error(HttpStatus.NOT_ACCEPTABLE, "Định dạng phản hồi được yêu cầu không được hỗ trợ", "NOT_ACCEPTABLE");
     }
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<ApiErrorResponse> handlePayloadTooLarge(MaxUploadSizeExceededException exception) {
-        return error(HttpStatus.PAYLOAD_TOO_LARGE, "The uploaded file is too large", "PAYLOAD_TOO_LARGE");
+        return error(HttpStatus.PAYLOAD_TOO_LARGE, "Tệp tải lên vượt quá dung lượng cho phép.", "PAYLOAD_TOO_LARGE");
     }
 
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<ApiErrorResponse> handleResponseStatus(ResponseStatusException exception) {
         HttpStatusCode status = exception.getStatusCode();
-        String fallback = HttpStatus.resolve(status.value()) != null
-                ? HttpStatus.valueOf(status.value()).getReasonPhrase()
-                : "Request failed";
+        String fallback = "Không thể thực hiện yêu cầu. Vui lòng thử lại.";
         return error(status, safeMessage(exception.getReason(), fallback), codeFor(status.value()));
     }
 
     @ExceptionHandler(NoSuchElementException.class)
     public ResponseEntity<ApiErrorResponse> handleNotFound(NoSuchElementException exception) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiErrorResponse.of("Requested resource was not found", "NOT_FOUND"));
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiErrorResponse.of("Không tìm thấy dữ liệu được yêu cầu.", "NOT_FOUND"));
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ApiErrorResponse> handleDatabaseConflict(DataIntegrityViolationException exception) {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiErrorResponse.of("The request conflicts with existing data", "CONFLICT"));
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiErrorResponse.of("Dữ liệu đã tồn tại hoặc đang được sử dụng. Vui lòng kiểm tra lại.", "CONFLICT"));
     }
 
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<ApiErrorResponse> handleRuntime(RuntimeException exception) {
-        String message = safeMessage(exception.getMessage(), "The request could not be processed");
+        String message = safeMessage(exception.getMessage(), "Không thể xử lý yêu cầu. Vui lòng kiểm tra dữ liệu và thử lại.");
         String normalized = message.toLowerCase(Locale.ROOT);
         if (containsAny(normalized, "quyền", "permission", "unauthorized", "not have permission")) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiErrorResponse.of(message, "PROJECT_PERMISSION_DENIED"));
@@ -103,7 +116,7 @@ public class GlobalExceptionHandler {
         if (containsAny(normalized, "not found", "không tìm thấy")) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiErrorResponse.of(message, "NOT_FOUND"));
         }
-        if (containsAny(normalized, "đã tồn tại", "đã có", "already", "duplicate", "reuse")) {
+        if (containsAny(normalized, "đã tồn tại", "đã có", "already", "duplicate", "reuse", "tái sử dụng")) {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiErrorResponse.of(message, "CONFLICT"));
         }
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(ApiErrorResponse.of(message, "BUSINESS_RULE_VIOLATION"));
@@ -111,7 +124,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiErrorResponse> handleUnexpected(Exception exception) {
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiErrorResponse.of("An unexpected server error occurred", "INTERNAL_ERROR"));
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiErrorResponse.of("Hệ thống đang gặp lỗi. Vui lòng thử lại sau.", "INTERNAL_ERROR"));
     }
 
     private static String safeMessage(String candidate, String fallback) {

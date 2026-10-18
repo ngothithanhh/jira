@@ -73,7 +73,7 @@ public class AuthServiceImpl implements AuthService {
     public AuthResponseDTO refreshToken(String refreshToken){
         RefreshToken token = refreshTokenService.verifyToken(refreshToken);
         if (token.getUser().isLocked()) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Account is locked");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên.");
         }
 
         RefreshToken newToken = refreshTokenService.rotateRefreshToken(token);

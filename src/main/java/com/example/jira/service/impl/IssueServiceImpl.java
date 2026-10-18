@@ -183,10 +183,10 @@ public class IssueServiceImpl implements IssueService {
             return IssueMapper.toResponse(issue); 
         }
 
-        if (boardIssueRepository.existsByIssue_IssueId(issueId)) throw new RuntimeException("Use board move API for a board issue");
+        if (boardIssueRepository.existsByIssue_IssueId(issueId)) throw new RuntimeException("Vui lòng chuyển trạng thái công việc trực tiếp trên bảng");
         if (!workflowRuleRepository.existsByProject_ProjectIdAndFromStatus_StatusIdAndToStatus_StatusId(
                 issue.getProject().getProjectId(), issue.getStatus().getStatusId(), statusId)) {
-            throw new RuntimeException("Chuyển đổi trạng thái không hợp lệ theo quy trình (Workflow)!");
+            throw new RuntimeException("Chuyển đổi trạng thái không hợp lệ theo quy trình!");
         }
 
         IssueTransition transition = new IssueTransition();
@@ -243,7 +243,7 @@ public class IssueServiceImpl implements IssueService {
             throw new RuntimeException("Bạn không có quyền xem dự án này!");
         }
         if (page < 0 || size < 1 || size > 100) {
-            throw new RuntimeException("page phải >= 0 và size nằm trong khoảng 1-100!");
+            throw new RuntimeException("Số trang phải từ 0 trở lên và số bản ghi mỗi trang phải từ 1 đến 100!");
         }
         Pageable pageable = PageRequest.of(page, size, parseSort(sort));
         String query = q == null || q.isBlank() ? null : q.trim();
@@ -286,7 +286,7 @@ public class IssueServiceImpl implements IssueService {
     @Transactional(readOnly = true)
     public List<IssueResponse> getProductBacklog(int projectId) {
         if (!projectSecurity.hasPermission(projectId, PermissionName.VIEW_PROJECT)) {
-            throw new RuntimeException("Bạn không có quyền xem backlog của dự án này!");
+            throw new RuntimeException("Bạn không có quyền xem danh sách chờ của dự án này!");
         }
         return issueRepository.findProductBacklog(projectId, List.of(SprintState.FUTURE, SprintState.ACTIVE))
                 .stream().map(IssueMapper::toResponse).toList();
@@ -296,17 +296,17 @@ public class IssueServiceImpl implements IssueService {
     @Transactional
     public void rankBacklogIssue(int projectId, int issueId, Integer beforeIssueId) {
         if (!projectSecurity.hasPermission(projectId, PermissionName.MANAGE_SPRINT)) {
-            throw new RuntimeException("Bạn không có quyền sắp xếp backlog của dự án này!");
+            throw new RuntimeException("Bạn không có quyền sắp xếp danh sách chờ của dự án này!");
         }
         Issue issue = getActiveIssueOrThrow(issueId);
         if (issue.getProject().getProjectId() != projectId) {
-            throw new RuntimeException("Issue phải thuộc cùng dự án!");
+            throw new RuntimeException("Công việc phải thuộc cùng dự án!");
         }
         List<Issue> backlog = issueRepository.findProductBacklog(projectId, List.of(SprintState.FUTURE, SprintState.ACTIVE))
                 .stream().sorted(Comparator.comparing(Issue::getBacklogRank,
                         Comparator.nullsLast(Long::compareTo)).thenComparing(Issue::getIssueId)).toList();
         if (backlog.stream().noneMatch(i -> i.getIssueId() == issueId)) {
-            throw new RuntimeException("Chỉ có thể sắp xếp issue trong product backlog!");
+            throw new RuntimeException("Chỉ có thể sắp xếp công việc trong danh sách chờ của sản phẩm!");
         }
         if (beforeIssueId != null && beforeIssueId == issueId) {
             return;
@@ -317,7 +317,7 @@ public class IssueServiceImpl implements IssueService {
         else {
             int index = -1;
             for (int i = 0; i < reordered.size(); i++) if (reordered.get(i).getIssueId() == beforeIssueId) { index = i; break; }
-            if (index < 0) throw new RuntimeException("Issue đích phải thuộc product backlog cùng dự án!");
+            if (index < 0) throw new RuntimeException("Công việc đích phải thuộc danh sách chờ của cùng dự án!");
             reordered.add(index, issue);
         }
         for (int i = 0; i < reordered.size(); i++) reordered.get(i).setBacklogRank((long) (i + 1) * 1024);

@@ -22,7 +22,7 @@ public class CustomUserDetailsService implements UserDetailsService {
     @Transactional
     public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
         //tim user trong database
-        User user = userRepository.findByEmail(email).orElseThrow(()-> new UsernameNotFoundException("User not found: " + email));
+        User user = userRepository.findByEmail(email).orElseThrow(()-> new UsernameNotFoundException("Không tìm thấy người dùng: " + email));
 
         //tra ve UserDetails cho Spring Security
         return UserPrincipal.fromUser(user);

@@ -22,6 +22,6 @@ public class RestAccessDeniedHandler implements AccessDeniedHandler {
     public void handle(HttpServletRequest request, HttpServletResponse response, AccessDeniedException exception) throws IOException {
         response.setStatus(HttpStatus.FORBIDDEN.value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        objectMapper.writeValue(response.getOutputStream(), ApiErrorResponse.of("You do not have permission to perform this action", "FORBIDDEN"));
+        objectMapper.writeValue(response.getOutputStream(), ApiErrorResponse.of("Bạn không có quyền thực hiện thao tác này.", "FORBIDDEN"));
     }
 }

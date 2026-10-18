@@ -97,7 +97,7 @@ public class IssueCommentServiceImpl implements IssueCommentService {
 
     private IssueComment findComment(int issueId, int id) {
         return issueCommentRepository.findById(id).filter(c -> c.getIssue().getIssueId() == issueId)
-                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND, "Comment not found"));
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND, "Không tìm thấy bình luận"));
     }
 
     @Override

@@ -46,7 +46,7 @@ public class AuthController {
     public ResponseEntity<?> getCurrentUser(Authentication authentication) {
         if (authentication == null || !authentication.isAuthenticated()) {
             return ResponseEntity.status(401)
-                    .body(ApiErrorResponse.of("Authentication is required", "UNAUTHORIZED"));
+                    .body(ApiErrorResponse.of("Vui lòng đăng nhập để tiếp tục.", "UNAUTHORIZED"));
         }
 
 //        System.out.println("AUTH: " + authentication);

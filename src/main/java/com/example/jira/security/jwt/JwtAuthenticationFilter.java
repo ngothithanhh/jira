@@ -30,6 +30,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private ObjectMapper objectMapper;
 
     @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        String path = request.getServletPath();
+        return "/api/auth/login".equals(path) || "/api/auth/register".equals(path);
+    }
+
+    @Override
     protected void doFilterInternal(
             HttpServletRequest request,
             HttpServletResponse response,
@@ -88,6 +94,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private void writeUnauthorized(HttpServletResponse response) throws IOException {
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
         response.setContentType("application/json");
-        objectMapper.writeValue(response.getOutputStream(), ApiErrorResponse.of("Access token is invalid or expired", "UNAUTHORIZED"));
+        objectMapper.writeValue(response.getOutputStream(), ApiErrorResponse.of("Phiên đăng nhập không hợp lệ hoặc đã hết hạn. Vui lòng đăng nhập lại.", "UNAUTHORIZED"));
     }
 }

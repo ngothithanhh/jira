@@ -44,7 +44,7 @@ public class ProjectServiceImpl implements ProjectService {
         User user = userRepository.findById(userId).orElseThrow(()->new RuntimeException("Không tìm thấy người dùng!"));
 
         if(!globalSecurity.hasPermission(PermissionName.CREATE_PROJECT))
-            throw new RuntimeException("Bạn không có quyền tạo project");
+            throw new RuntimeException("Bạn không có quyền tạo dự án");
 
         if(projectRepository.existsByProjectKey(request.getProjectKey())){
             throw new RuntimeException("Khóa dự án đã tồn tại!");
@@ -103,7 +103,7 @@ public class ProjectServiceImpl implements ProjectService {
         int userId = SecurityUtils.getCurrentUserId();
 
         if(!globalSecurity.hasPermission(PermissionName.DELETE_PROJECT))
-            throw new RuntimeException("Bạn không có quyền xóa project");
+            throw new RuntimeException("Bạn không có quyền xóa dự án");
 
         Project project = projectRepository.findById(id).orElseThrow(()->new RuntimeException("Không tìm thấy dự án!"));
         projectRepository.delete(project);

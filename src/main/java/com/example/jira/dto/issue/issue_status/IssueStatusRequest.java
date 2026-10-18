@@ -10,6 +10,6 @@ public class IssueStatusRequest {
     @NotBlank(message = "Tên trạng thái không được để trống")
     private String statusName;
 
-    @NotNull(message = "Category không được để trống")
+    @NotNull(message = "Nhóm trạng thái không được để trống")
     private StatusCategory statusCategory;
 }
