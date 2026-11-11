@@ -35,7 +35,8 @@ public class AuditLog {
     @Column(name = "entity_id")
     private int entityId;
 
-    @Column(columnDefinition = "NVARCHAR(MAX)")
+    // PostgreSQL lưu mô tả dài bằng text; NVARCHAR(MAX) của cấu hình cũ không tạo được trên PostgreSQL.
+    @Column(columnDefinition = "TEXT")
     private String description;
 
     @Column(name = "created_at", nullable = false)

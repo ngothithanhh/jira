@@ -1,5 +1,7 @@
 # Bộ kiểm thử hồi quy backend
 
+Kết quả hiện tại: xem FINAL_VERIFICATION_RESULTS.md (423 test đạt ngày 12/11/2026). REGRESSION_RESULTS.md lưu baseline trước sửa. FEATURE_STATUS.md đối chiếu 19 nhóm UC và các giới hạn còn lại.
+
 ## Phạm vi và giới hạn
 
 Bộ test bao phủ các chức năng đang triển khai trong backend Spring Boot. Chưa có frontend trong checkout này.
@@ -10,6 +12,7 @@ Không coi coverage cao hoặc mọi test xanh là bằng chứng đã hết bug
 - HTTP: MockMvc qua SecurityConfig, JwtAuthenticationFilter và JwtUtil thật. Service được mock để kiểm hợp đồng controller; kết quả này không chứng minh tính nguyên tử DB.
 - Integration: JPA/repository và service thật trên PostgreSQL container riêng hoặc cluster test mới do script tạo. Giả lập quyền dự án và NotificationService để chủ động tạo nhánh lỗi. Không chứng minh phân quyền đầu cuối bằng nhóm integration này.
 - Cloudinary: SDK và dịch vụ ngoài được mock. Không upload/xóa tệp trên tài khoản thật.
+- Full app HTTP: SystemSmokeIT mở server loopback cổng ngẫu nhiên trên schema smoke riêng trong DB test đã xác minh. Security/AuthenticationManager/quyền/service/repository/notification DB thật; không gọi SMTP/Cloudinary.
 - Không gọi SMTP, Redis hoặc HTTP bên ngoài để làm dữ liệu test.
 
 Test contextLoads cũ phụ thuộc cấu hình DB mặc định đã được thay bằng test HTTP và nhóm PostgreSQL tách biệt. Khi chuyển sang bộ test này lần đầu, chạy `clean` để xóa class contextLoads đã biên dịch từ trước.

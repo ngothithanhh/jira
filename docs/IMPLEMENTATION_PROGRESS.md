@@ -22,9 +22,10 @@ Người dùng đã duyệt plan sửa bug và cho phép tiếp tục tự độ
 | 5 | Sửa/xóa sprint, board, column | 319 unit/HTTP + 30 PostgreSQL đạt; đã tự kiểm tra | f777900 |
 | 6 | Tổng kết sprint, velocity, burndown | 334 unit/HTTP + 33 PostgreSQL đạt; đã tự kiểm tra | acfe3fe |
 | 7 | Quản lý người dùng/tài khoản, vai trò thành viên | Clean verify: 354 unit/HTTP + 43 PostgreSQL đạt; đã tự kiểm tra | 26c2716 |
-| 8 | Sửa/xóa comment, notification, tra cứu audit | 371 unit/HTTP + 49 PostgreSQL đạt; đã tự kiểm tra | Xem git log |
+| 8 | Sửa/xóa comment, notification, tra cứu audit | 371 unit/HTTP + 49 PostgreSQL đạt; đã tự kiểm tra | 9ea06df |
+| 9 | Kiểm full app/HTTP/Swagger, sửa hợp đồng type ID, tài liệu vận hành | Clean verify: 372 unit/HTTP + 49 PostgreSQL + 2 HTTP smoke = 423 test đạt | Xem git log |
 
-Kiểm tra full app/HTTP thật và Swagger tiếp tục theo FINAL_VERIFICATION_PLAN.md trước khi chốt báo cáo tính năng cuối.
+Kiểm tra full app/HTTP thật và Swagger đã hoàn tất theo FINAL_VERIFICATION_PLAN.md. Kết quả tại FINAL_VERIFICATION_RESULTS.md, đối chiếu 19 UC/giới hạn tại FEATURE_STATUS.md; chạy/migration tại RUN_AND_MIGRATE.md. Không đồng nghĩa đã deploy, hoàn thiện FE hoặc kiểm mọi tổ hợp input/concurrency.
 
 ## Điều kiện ghi nhận hoàn tất
 

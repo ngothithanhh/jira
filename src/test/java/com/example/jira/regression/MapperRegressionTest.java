@@ -9,6 +9,11 @@ import static org.assertj.core.api.Assertions.*;
 
 /** Kiểm các response có dữ liệu thật, đặc biệt những ID có thể bị nhầm giữa các quan hệ. */
 class MapperRegressionTest {
+    // Client phải lấy ID loại từ JSON để gán vào project, không chỉ nhận tên hiển thị.
+    @Test void issueTypeResponseKeepsDatabaseId() {
+        var type=new IssueType(); type.setIssueTypeId(7); type.setTypeName("Task");
+        assertThat(IssueTypeMapper.toResponse(type).getIssueTypeId()).isEqualTo(7);
+    }
     // Mapping member giữ user ID khác role ID và không lấy nhầm project lead.
     @Test void memberResponsePreservesUserAndRole() {
         var m = new ProjectMember(); m.setProject(Fixtures.project(10)); m.setUser(Fixtures.user(2));

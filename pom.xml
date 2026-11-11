@@ -120,7 +120,8 @@
 		<dependency>
 			<groupId>org.springdoc</groupId>
 			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-			<version>2.5.0</version>
+			<!-- Tương thích Boot 3.5 / Spring 6.2; bản 2.5 gọi constructor ControllerAdviceBean đã bị bỏ. -->
+			<version>2.10.0</version>
 		</dependency>
 
 		<!-- Cloudinary -->

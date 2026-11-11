@@ -82,7 +82,7 @@ class PostgresRegressionIT {
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl); r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);
     }
-    @Configuration @EntityScan("com.example.jira.entity")
+    @org.springframework.boot.test.context.TestConfiguration @EntityScan("com.example.jira.entity")
     @EnableJpaRepositories("com.example.jira.repository")
     @Import({BoardServiceImpl.class, SprintServiceImpl.class, IssueServiceImpl.class, RefreshTokenServiceImpl.class,
             AuthServiceImpl.class, BacklogService.class, BoardCardService.class, BoardWipPolicy.class,
