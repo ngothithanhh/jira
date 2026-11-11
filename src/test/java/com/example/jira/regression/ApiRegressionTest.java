@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.*;
         IssueCommentController.class, IssueAttachmentController.class, IssueTypeController.class,
         IssueStatusController.class, UserRoleController.class, PermissionController.class,
         RolePermissionController.class, WorkflowController.class, BoardController.class,
-        SprintController.class, NotificationController.class, BacklogController.class, BoardCardController.class}, properties = {
+        SprintController.class, NotificationController.class, BacklogController.class, BoardCardController.class, IssueQueryController.class}, properties = {
         "app.jwt.secret=" + SecurityRegressionTest.SECRET, "app.jwt.expiration=60000"})
 @Import({SecurityConfig.class, JwtUtil.class, CorsConfig.class})
 class ApiRegressionTest {
@@ -60,6 +60,20 @@ class ApiRegressionTest {
     @MockBean NotificationService notifications;
     @MockBean com.example.jira.service.impl.BacklogService backlog;
     @MockBean com.example.jira.service.impl.BoardCardService cards;
+    @MockBean com.example.jira.service.impl.IssueQueryService queryIssues;
+
+    @ParameterizedTest @ValueSource(strings = {"page=-1","size=101","statusId=0","sprintId=-1"})
+    void invalidIssueSearchQueryIsBadRequest(String query) throws Exception {
+        mvc.perform(get("/api/projects/10/issues/search?" + query).header("Authorization",bearer())).andExpect(status().isBadRequest());
+        verifyNoInteractions(queryIssues);
+    }
+    @Test void detailSearchAndDeleteRoutesPassScopeAndVersion() throws Exception {
+        mvc.perform(get("/api/issues/5").header("Authorization",bearer())).andExpect(status().isOk());
+        mvc.perform(get("/api/projects/10/issues/search?keyword=task&page=1&size=5&unassigned=true").header("Authorization",bearer())).andExpect(status().isOk());
+        mvc.perform(delete("/api/issues/5?expectedVersion=3").header("Authorization",bearer())).andExpect(status().isNoContent());
+        verify(queryIssues).detail(5); verify(queryIssues).search(eq(10),argThat(request -> request.getPage() == 1 && request.getSize() == 5 && request.isUnassigned()));
+        verify(queryIssues).delete(5,3L);
+    }
 
     // Move bắt buộc version; thiếu hoặc âm không được đi vào nghiệp vụ.
     @ParameterizedTest @ValueSource(strings = {"{}", "{\"columnId\":60,\"statusId\":1,\"position\":0}", "{\"columnId\":60,\"statusId\":1,\"position\":0,\"expectedVersion\":-1}"})

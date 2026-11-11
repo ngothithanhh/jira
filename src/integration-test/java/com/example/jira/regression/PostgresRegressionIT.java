@@ -85,7 +85,8 @@ class PostgresRegressionIT {
     @Configuration @EntityScan("com.example.jira.entity")
     @EnableJpaRepositories("com.example.jira.repository")
     @Import({BoardServiceImpl.class, SprintServiceImpl.class, IssueServiceImpl.class, RefreshTokenServiceImpl.class,
-            AuthServiceImpl.class, BacklogService.class, BoardCardService.class, BoardWipPolicy.class, DatabaseSeeder.class})
+            AuthServiceImpl.class, BacklogService.class, BoardCardService.class, BoardWipPolicy.class,
+            IssueQueryService.class, AuditLogServiceImpl.class, DatabaseSeeder.class})
     static class Config {
         // Cleanup container chạy khi context đóng; local cluster do script dừng sau khi Maven kết thúc.
         @Bean org.springframework.beans.factory.DisposableBean postgresCleanup() {
@@ -123,6 +124,8 @@ class PostgresRegressionIT {
     @Autowired BoardCardService boardCardService;
     @Autowired BoardIssueRepository boardRanks;
     @Autowired BoardColumnStatusRepository boardMappings;
+    @Autowired IssueQueryService issueQueryService;
+    @Autowired AuditLogServiceImpl auditService;
     @Autowired DatabaseSeeder seeder;
     User caller;
     Project project;
@@ -425,6 +428,88 @@ class PostgresRegressionIT {
         body.setPosition(0); body.setExpectedVersion(issue.getVersion()); return body;
     }
     private record MoveFixture(Board board,BoardColumn target,IssueStatus to,Issue issue) { }
+    // Count và trang phải cùng scope, optional relation không làm mất issue; %/_ là ký tự thường.
+    @Test void issueSearchPaginatesCountsAndEscapesWildcards() {
+        var a = persistedIssue(); a.setSummary("Fix_100%"); a = issues.saveAndFlush(a);
+        var b = additionalIssue(2); b.setSummary("FixA100x"); issues.saveAndFlush(b); additionalIssue(3);
+        var foreign = Fixtures.project(0); foreign.setProjectKey("OTHER"); foreign.setLead(caller); foreign = projects.saveAndFlush(foreign);
+        var outsider = new Issue(); outsider.setProject(foreign); outsider.setSummary("Fix_100%"); outsider.setIssueKey("OTHER-1"); outsider.setIssueNumber(1); issues.saveAndFlush(outsider);
+        var request = new com.example.jira.dto.issue.IssueSearchRequest(); request.setSize(1); request.setSort("issueNumber"); request.setDirection("ASC"); request.setPage(1);
+        var page = issueQueryService.search(project.getProjectId(),request);
+        assertThat(page.totalItems()).isEqualTo(3); assertThat(page.totalPages()).isEqualTo(3); assertThat(page.items()).extracting(com.example.jira.dto.issue.IssueResponse::getIssueId).containsExactly(b.getIssueId());
+        request.setPage(0); request.setKeyword("_100%");
+        var literal = issueQueryService.search(project.getProjectId(),request);
+        assertThat(literal.totalItems()).isEqualTo(1); assertThat(literal.items()).extracting(com.example.jira.dto.issue.IssueResponse::getIssueId).containsExactly(a.getIssueId());
+    }
+    // Tất cả filter AND với project và subquery sprint; status/type/user ID không mở rộng scope.
+    @Test void issueSearchCombinesAllFiltersAtDatabase() {
+        var a = persistedIssue(); var b = additionalIssue(2);
+        var status = statuses.saveAndFlush(Fixtures.status(0,"Todo",StatusCategory.TO_DO)); var type = new IssueType(); type.setTypeName("Task"); type = types.saveAndFlush(type);
+        for (var candidate : List.of(a,b)) { candidate.setStatus(status); candidate.setIssueType(type); candidate.setReporter(caller); candidate.setAssignee(caller); candidate.setPriority("HIGH"); issues.saveAndFlush(candidate); }
+        var sprint = persistedSprint(SprintState.FUTURE); saveLink(sprint,a);
+        var request = new com.example.jira.dto.issue.IssueSearchRequest(); request.setStatusId(status.getStatusId()); request.setTypeId(type.getIssueTypeId());
+        request.setAssigneeId(caller.getUserId()); request.setReporterId(caller.getUserId()); request.setPriority("high"); request.setSprintId(sprint.getSprintId());
+        assertThat(issueQueryService.search(project.getProjectId(),request).items()).extracting(com.example.jira.dto.issue.IssueResponse::getIssueId).containsExactly(a.getIssueId());
+        request.setAssigneeId(null); request.setUnassigned(true);
+        assertThat(issueQueryService.search(project.getProjectId(),request).items()).isEmpty();
+    }
+    // Xóa đủ bảy loại liên kết nhưng giữ issue khác, các định nghĩa và audit ID/key của issue đã xóa.
+    @Test void deletingIssueCleansOnlyItsDependenciesAndKeepsAudit() {
+        var issue = persistedIssue(); var other = additionalIssue(2); var sprint = persistedSprint(SprintState.FUTURE); saveLink(sprint,issue);
+        var board = persistedBoard("Team"); var column = persistedColumn(board,"Todo",0);
+        var rank = new BoardIssue(); rank.setId(new BoardIssueId(board.getBoardId(),issue.getIssueId())); rank.setBoard(board); rank.setIssue(issue); rank.setColumn(column); boardRanks.saveAndFlush(rank);
+        tx(() -> {
+            var comment = new IssueComment(); comment.setIssue(issue); comment.setUser(caller); comment.setCommentText("Delete me"); em.persist(comment);
+            var keep = new IssueComment(); keep.setIssue(other); keep.setUser(caller); keep.setCommentText("Keep me"); em.persist(keep);
+            var notification = new Notification(); notification.setIssue(issue); notification.setUser(caller); em.persist(notification);
+            var transition = new IssueTransition(); transition.setIssue(issue); em.persist(transition);
+            var work = new WorkLog(); work.setIssue(issue); work.setUser(caller); work.setTimeSpent(60); em.persist(work);
+            var version = new ProjectVersion(); version.setProject(project); version.setVersionName("1"); em.persist(version);
+            // MapsId cần reference managed trong transaction fixture, không persist lại issue đã tồn tại.
+            var link = new IssueVersion(); link.setId(new IssueVersionId(issue.getIssueId(),version.getVersionId())); link.setIssue(em.getReference(Issue.class,issue.getIssueId())); link.setProjectVersion(version); em.persist(link);
+            return null;
+        });
+        issueQueryService.delete(issue.getIssueId(),issue.getVersion());
+        assertThat(issues.findById(issue.getIssueId())).isEmpty(); assertThat(issues.findById(other.getIssueId())).isPresent();
+        assertThat(jdbc.queryForObject("select count(*) from issue_comments",Integer.class)).isEqualTo(1);
+        for (String table : List.of("notifications","issue_transitions","board_issues","sprint_issues","work_logs","issue_versions")) assertThat(jdbc.queryForObject("select count(*) from " + table,Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from project_versions",Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from audit_logs where entity_type='ISSUE' and entity_id=?",Integer.class,issue.getIssueId())).isEqualTo(1);
+    }
+    // Audit cũng phải nằm trong transaction xóa: lỗi sau ghi audit khôi phục cả issue và comment.
+    @Test void failedDeleteAuditRollsBackIssueAndDependencies() {
+        var issue = persistedIssue(); tx(() -> { var comment = new IssueComment(); comment.setIssue(issue); comment.setCommentText("Keep"); em.persist(comment); return null; });
+        var factory = new ProxyFactory(); factory.setInterfaces(com.example.jira.service.AuditLogService.class); factory.setTarget(auditService);
+        factory.addAdvice((MethodInterceptor) invocation -> { Object result = invocation.proceed(); throw new IllegalStateException("audit failed"); });
+        Object target = AopTestUtils.getUltimateTargetObject(issueQueryService); ReflectionTestUtils.setField(target,"audit",factory.getProxy());
+        try {
+            assertThatThrownBy(() -> issueQueryService.delete(issue.getIssueId(),issue.getVersion())).hasMessageContaining("audit failed");
+            assertThat(issues.findById(issue.getIssueId())).isPresent(); assertThat(jdbc.queryForObject("select count(*) from issue_comments",Integer.class)).isEqualTo(1);
+            assertThat(jdbc.queryForObject("select count(*) from audit_logs where entity_type='ISSUE'",Integer.class)).isZero();
+        } finally { ReflectionTestUtils.setField(target,"audit",auditService); }
+    }
+    // Chặn xóa cây và attachment, không tự dọn dữ liệu từ xa hoặc làm con mất cha.
+    @Test void issueDeleteGuardsChildrenAndAttachments() {
+        var issue = persistedIssue(); var child = additionalIssue(2); child.setParentIssue(issue); child = issues.saveAndFlush(child);
+        assertThatThrownBy(() -> issueQueryService.delete(issue.getIssueId(),issue.getVersion())).hasMessageContaining("issue con");
+        issues.delete(child);
+        tx(() -> { var attachment = new IssueAttachment(); attachment.setIssue(issue); attachment.setUser(caller); attachment.setFilePath("https://example.invalid/test"); em.persist(attachment); return null; });
+        assertThatThrownBy(() -> issueQueryService.delete(issue.getIssueId(),issue.getVersion())).hasMessageContaining("attachment");
+        assertThat(issues.findById(issue.getIssueId())).isPresent(); assertThat(jdbc.queryForObject("select count(*) from issue_attachments",Integer.class)).isEqualTo(1);
+    }
+    // Migration backfill chạy lặp không hạ counter; xóa số cao nhất rồi tạo mới không tái dùng số cũ.
+    @Test void issueSequenceSurvivesDeletionAndRepeatMigration() throws Exception {
+        var legacy = persistedIssue(); legacy.setIssueNumber(7); legacy.setIssueKey("P0-7"); issues.saveAndFlush(legacy);
+        String sql = java.nio.file.Files.readString(java.nio.file.Path.of("scripts/migrations/003_issue_sequence.sql")); jdbc.execute(sql); jdbc.execute(sql);
+        var status = statuses.saveAndFlush(Fixtures.status(0,"Todo",StatusCategory.TO_DO));
+        var type = new IssueType(); type.setTypeName("Task"); type = types.saveAndFlush(type);
+        var link = new ProjectIssueType(); link.setId(new ProjectIssueTypeId(project.getProjectId(),type.getIssueTypeId())); link.setProject(project); link.setIssueType(type); projectTypes.saveAndFlush(link);
+        when(security.hasPermission(eq(project.getProjectId()),any())).thenReturn(true);
+        var request = new CreateIssueRequest(); request.setProjectId(project.getProjectId()); request.setIssueTypeId(type.getIssueTypeId()); request.setSummary("New");
+        var first = issueService.createIssue(request); assertThat(first.getIssueKey()).isEqualTo("P0-8");
+        issueQueryService.delete(first.getIssueId(),first.getVersion()); jdbc.execute(sql);
+        assertThat(issueService.createIssue(request).getIssueKey()).isEqualTo("P0-9");
+    }
     // Các helper chỉ tạo fixture đã commit trong DB test; không thay thuật toán production.
     private Sprint persistedSprint(SprintState state) {
         var sprint = new Sprint(); sprint.setProject(project); sprint.setState(state); return sprints.saveAndFlush(sprint);

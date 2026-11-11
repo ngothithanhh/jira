@@ -45,8 +45,8 @@ public class IssueServiceImpl implements IssueService {
      * Giữ kiểm quyền CREATE_ISSUE, sau đó khóa bản ghi projects cho đến khi transaction kết thúc.
      * Loại issue phải được gắn với project trong project_issue_types; issue cha nếu có phải cùng project.
      * Reporter là user đang đăng nhập, không lấy từ request; trạng thái đầu là TO_DO có statusId nhỏ nhất.
-     * Chỉ sau khi đủ điều kiện mới đọc MAX(issue_number), cấp số/mã và lưu issues trong cùng transaction.
-     * Ví dụ hai lượt tạo trong P10 cùng chờ khóa project 10: lượt sau đọc MAX sau khi lượt trước commit.
+     * Chỉ sau khi đủ điều kiện mới đọc MAX(issue_number)/projects.issue_sequence, cấp số/mã và lưu cùng transaction.
+     * Ví dụ hai lượt tạo trong P10 cùng chờ khóa project 10: lượt sau đọc counter sau khi lượt trước commit.
      * Lỗi làm rollback và nhả khóa; không tự retry. Unique ở DB là lớp chặn trùng bổ sung.
      */
     @Override
@@ -101,7 +101,11 @@ public class IssueServiceImpl implements IssueService {
 
         // Khóa project vẫn được giữ từ trước MAX đến hết commit; DB unique chặn các bên ghi không lấy khóa.
         int maxIssueNumber = issueRepository.findMaxIssueNumberByProjectId(project.getProjectId()).orElse(0);
-        int nextIssueNumber = maxIssueNumber + 1;
+        // Counter của project giữ số đã cấp kể cả issue cuối đã xóa; MAX hỗ trợ dữ liệu có trước migration.
+        int lastNumber = Math.max(project.getIssueSequence(),maxIssueNumber);
+        if (lastNumber == Integer.MAX_VALUE) throw new ResponseStatusException(HttpStatus.CONFLICT,"Dự án đã dùng hết dải số issue");
+        int nextIssueNumber = lastNumber + 1;
+        project.setIssueSequence(nextIssueNumber);
         issue.setIssueNumber(nextIssueNumber);
         issue.setIssueKey(project.getProjectKey() + "-" + nextIssueNumber);
         issue.setCreatedAt(LocalDateTime.now());

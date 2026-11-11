@@ -12,7 +12,8 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface IssueRepository extends JpaRepository<Issue,Integer> {
+public interface IssueRepository extends JpaRepository<Issue,Integer>, org.springframework.data.jpa.repository.JpaSpecificationExecutor<Issue> {
+    boolean existsByParentIssue_IssueId(int issueId);
     // Card lấy status từ issues; LEFT JOIN giữ việc chưa giao/chưa có trạng thái hoặc cha.
     @Query("""
             select i from Issue i join fetch i.project left join fetch i.status left join fetch i.issueType

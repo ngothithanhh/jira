@@ -31,6 +31,10 @@ public class Project {
 
     private String description;
 
+    // Số cao nhất đã cấp, giữ lại khi xóa issue để không tái sử dụng mã đã phát hành.
+    @Column(name = "issue_sequence", nullable = false)
+    private int issueSequence;
+
     @ManyToOne
     @JoinColumn(name = "lead_user_id")
     private User lead;

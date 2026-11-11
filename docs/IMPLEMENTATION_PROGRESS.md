@@ -17,8 +17,8 @@ Người dùng đã duyệt plan sửa bug và cho phép tiếp tục tự độ
 |---|---|---|---|
 | 1 | JWT, quyền truy cập, nullable issue DTO, transaction issue, số issue đồng thời, vòng đời sprint, refresh rotation | 243 unit/HTTP + 11 PostgreSQL đạt; đã tự kiểm tra | ea1e39a |
 | 2 | Sprint backlog và product backlog, thứ tự issue | 263 unit/HTTP + 16 PostgreSQL đạt; đã tự kiểm tra | 3a1a092 |
-| 3 | Issue trên board, di chuyển, vị trí và WIP | 281 unit/HTTP + 20 PostgreSQL đạt; đã tự kiểm tra | Xem git log |
-| 4 | Chi tiết/xóa issue, tìm kiếm, lọc, phân trang | Chờ plan chi tiết | Chưa commit |
+| 3 | Issue trên board, di chuyển, vị trí và WIP | 281 unit/HTTP + 20 PostgreSQL đạt; đã tự kiểm tra | ecf3e56 |
+| 4 | Chi tiết/xóa issue, tìm kiếm, lọc, phân trang | 303 unit/HTTP + 26 PostgreSQL đạt; đã tự kiểm tra | Xem git log |
 | 5 | Sửa/xóa sprint, board, column | Chờ plan chi tiết | Chưa commit |
 | 6 | Tổng kết sprint, velocity, burndown | Chờ plan chi tiết | Chưa commit |
 | 7 | Quản lý người dùng/tài khoản, vai trò thành viên | Chờ plan chi tiết | Chưa commit |
