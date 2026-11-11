@@ -15,6 +15,8 @@ import java.util.List;
 
 @Component("globalSecurity")
 @RequiredArgsConstructor
+// Tên role là quan hệ lazy; giữ transaction đọc qua toàn bộ kiểm tra quyền, không phụ thuộc Open EntityManager In View.
+@org.springframework.transaction.annotation.Transactional(readOnly = true)
 public class GlobalSecurity {
 
     private final UserRoleAssignmentRepository userRoleAssignmentRepository;

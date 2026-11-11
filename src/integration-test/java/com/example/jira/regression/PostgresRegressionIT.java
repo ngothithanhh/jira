@@ -87,20 +87,27 @@ class PostgresRegressionIT {
     @Import({BoardServiceImpl.class, SprintServiceImpl.class, IssueServiceImpl.class, RefreshTokenServiceImpl.class,
             AuthServiceImpl.class, BacklogService.class, BoardCardService.class, BoardWipPolicy.class,
             IssueQueryService.class, AuditLogServiceImpl.class, ContainerManagementService.class,
-            SprintMetricsService.class, ScrumReportService.class, DatabaseSeeder.class})
+            SprintMetricsService.class, ScrumReportService.class, AccountManagementService.class,
+            ProjectMemberServiceImpl.class, UserRoleServiceImpl.class, com.example.jira.security.GlobalSecurity.class,
+            com.example.jira.security.CustomUserDetailsService.class, DatabaseSeeder.class})
     static class Config {
         // Cleanup container chạy khi context đóng; local cluster do script dừng sau khi Maven kết thúc.
         @Bean org.springframework.beans.factory.DisposableBean postgresCleanup() {
             return () -> { if (containerStarted) { POSTGRES.stop(); containerStarted = false; } };
         }
         @Bean PasswordEncoder passwordEncoder() { return new BCryptPasswordEncoder(4); }
+        // Authentication thật trong integration account để kiểm mật khẩu/disabled qua DaoAuthenticationProvider.
+        @Bean AuthenticationManager authenticationManager(com.example.jira.security.CustomUserDetailsService details,PasswordEncoder encoder) {
+            var provider = new org.springframework.security.authentication.dao.DaoAuthenticationProvider();
+            provider.setUserDetailsService(details); provider.setPasswordEncoder(encoder);
+            return new org.springframework.security.authentication.ProviderManager(provider);
+        }
         @Bean JwtUtil jwt() {
             return new JwtUtil();
         }
     }
     @MockBean ProjectSecurity security;
     @MockBean NotificationService notifications;
-    @MockBean AuthenticationManager authentication;
     @Autowired JdbcTemplate jdbc;
     @Autowired PlatformTransactionManager manager;
     @Autowired EntityManager em;
@@ -132,6 +139,14 @@ class PostgresRegressionIT {
     @Autowired ScrumReportService reports;
     @Autowired SprintMetricRepository metricRows;
     @Autowired SprintMetricPointRepository metricPoints;
+    @Autowired AccountManagementService accounts;
+    @Autowired ProjectMemberServiceImpl memberService;
+    @Autowired UserRoleServiceImpl roleService;
+    @Autowired UserRoleRepository roleRows;
+    @Autowired UserRoleAssignmentRepository roleAssignments;
+    @Autowired ProjectMemberRepository members;
+    @Autowired PasswordEncoder encoder;
+    @Autowired JwtUtil jwt;
     @Autowired DatabaseSeeder seeder;
     User caller;
     Project project;
@@ -625,6 +640,120 @@ class PostgresRegressionIT {
             assertThat(sprints.findById(sprint.getSprintId()).orElseThrow().getState()).isEqualTo(SprintState.ACTIVE);
             assertThat(metricRows.findBySprint_SprintId(sprint.getSprintId()).orElseThrow().getFinishedAt()).isNull(); assertThat(metricPoints.count()).isEqualTo(1);
         } finally { ReflectionTestUtils.setField(target,"points",metricPoints); }
+    }
+    // Login thật, password hash/stamp/thu hồi phiên và migration lặp; JWT mới mang version DB sau đổi mật khẩu.
+    @Test void passwordChangeRevokesSessionsAndLoginUsesNewVersion() throws Exception {
+        String sql = java.nio.file.Files.readString(java.nio.file.Path.of("scripts/migrations/005_account_state.sql")); jdbc.execute(sql); jdbc.execute(sql);
+        caller.setPasswordHash(encoder.encode("old-password")); caller = users.saveAndFlush(caller);
+        var login = new com.example.jira.dto.auth.LoginRequestDTO(); login.setEmail(caller.getEmail()); login.setPassword("old-password");
+        var original = authService.login(login); assertThat(jwt.extractVersion(original.getToken())).isZero();
+        accounts.profile(new com.example.jira.dto.account.AccountRequests.Profile("renamed","Display"));
+        assertThat(users.findById(caller.getUserId()).orElseThrow().getUserName()).isEqualTo("renamed");
+        accounts.password(new com.example.jira.dto.account.AccountRequests.Password("old-password","new-password"));
+        User changed = users.findById(caller.getUserId()).orElseThrow(); assertThat(changed.getAuthVersion()).isEqualTo(1); assertThat(encoder.matches("new-password",changed.getPasswordHash())).isTrue();
+        assertThat(tokens.findAll()).allSatisfy(token -> assertThat(token.isRevoked()).isTrue());
+        assertThatThrownBy(() -> authService.login(login)).isInstanceOf(org.springframework.security.authentication.BadCredentialsException.class);
+        login.setPassword("new-password"); var next = authService.login(login); assertThat(jwt.extractVersion(next.getToken())).isEqualTo(1);
+        assertThatThrownBy(() -> authService.refreshToken(original.getRefreshToken())).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+    }
+    // Hai admin tự gỡ quyền hoặc tự disable cùng lúc chỉ bỏ được một admin; role lock giữ người còn lại.
+    @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(booleans={false,true})
+    void concurrentLastAdminMutationsKeepOneEnabledAdmin(boolean disable) throws Exception {
+        var second = Fixtures.user(0); second.setEmail("second-admin@test.invalid"); second = users.saveAndFlush(second);
+        UserRole admin = makeAdmin(caller); makeAdmin(second); List<Integer> ids=List.of(caller.getUserId(),second.getUserId()); var index=new java.util.concurrent.atomic.AtomicInteger();
+        var results=race(() -> {
+            int id=ids.get(index.getAndIncrement()); Fixtures.login(id);
+            try { return outcome(() -> { if (disable) accounts.enabled(id,false); else accounts.revokeRole(id,admin.getRoleId()); return true; }); }
+            finally { org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
+        });
+        assertOneSuccessAndConflict(results); assertThat(roleAssignments.countEnabledAdmins()).isEqualTo(1);
+    }
+    // Refresh có thể xong trước mutation, nhưng sau password/disable không được còn refresh con hoạt động.
+    @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(booleans={false,true})
+    void refreshCannotEscapePasswordChangeOrDisable(boolean disable) throws Exception {
+        User target = caller;
+        if (disable) {
+            makeAdmin(caller); target=Fixtures.user(0); target.setEmail("session-target@test.invalid"); target=users.saveAndFlush(target);
+        }
+        target.setPasswordHash(encoder.encode("old-password")); target=users.saveAndFlush(target);
+        RefreshToken old=refreshService.createRefreshToken(target); int targetId=target.getUserId(), actorId=caller.getUserId();
+        var barrier=new CyclicBarrier(2); var pool=Executors.newFixedThreadPool(2);
+        try {
+            var mutation=pool.submit(() -> { Fixtures.login(disable?actorId:targetId); await(barrier);
+                try { if (disable) accounts.enabled(targetId,false); else accounts.password(new com.example.jira.dto.account.AccountRequests.Password("old-password","new-password")); return true; }
+                finally { org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
+            });
+            var refresh=pool.submit(() -> { await(barrier); return outcome(() -> authService.refreshToken(old.getTokenValue())); });
+            assertThat(mutation.get(30,TimeUnit.SECONDS)).isTrue();
+            Outcome refreshed=refresh.get(30,TimeUnit.SECONDS);
+            if (refreshed.failure()!=null) assertThat(refreshed.failure()).isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException.class,e -> assertThat(e.getStatusCode().value()).isEqualTo(401));
+            assertThat(users.findById(targetId).orElseThrow().getAuthVersion()).isEqualTo(1);
+            assertThat(tokens.findAll()).allSatisfy(token -> assertThat(token.isRevoked()).isTrue());
+            if (disable) assertThat(users.findById(targetId).orElseThrow().isEnabled()).isFalse();
+        } finally { pool.shutdownNow(); assertThat(pool.awaitTermination(10,TimeUnit.SECONDS)).isTrue(); }
+    }
+    // Lỗi audit không được để hash/version mới hoặc refresh đã thu hồi commit riêng.
+    @Test void failedPasswordAuditRollsBackCredentialAndSessionChanges() {
+        caller.setPasswordHash(encoder.encode("old-password")); caller=users.saveAndFlush(caller); var token=refreshService.createRefreshToken(caller);
+        var factory=new ProxyFactory(); factory.setInterfaces(com.example.jira.service.AuditLogService.class); factory.setTarget(auditService);
+        factory.addAdvice((MethodInterceptor) invocation -> { invocation.proceed(); throw new IllegalStateException("account audit failed"); });
+        Object target=AopTestUtils.getUltimateTargetObject(accounts); ReflectionTestUtils.setField(target,"audit",factory.getProxy());
+        try {
+            assertThatThrownBy(() -> accounts.password(new com.example.jira.dto.account.AccountRequests.Password("old-password","new-password"))).hasMessageContaining("account audit failed");
+            User current=users.findById(caller.getUserId()).orElseThrow(); assertThat(current.getAuthVersion()).isZero(); assertThat(encoder.matches("old-password",current.getPasswordHash())).isTrue();
+            assertThat(tokens.findById(token.getTokenId()).orElseThrow().isRevoked()).isFalse();
+        } finally { ReflectionTestUtils.setField(target,"audit",auditService); }
+    }
+    // Đổi role chỉ tác động project_members; hai lượt cấp PM dưới project lock chỉ một lượt thành công.
+    @Test void concurrentProjectManagerAssignmentsKeepSingleManager() throws Exception {
+        var developer=roleRows.saveAndFlush(Fixtures.role(0,"DEVELOPER")); var manager=roleRows.saveAndFlush(Fixtures.role(0,"PROJECT_MANAGER"));
+        var a=Fixtures.user(0); a.setEmail("member-a@test.invalid"); a=users.saveAndFlush(a); var b=Fixtures.user(0); b.setEmail("member-b@test.invalid"); b=users.saveAndFlush(b);
+        for (User user : List.of(a,b)) {
+            var member=new ProjectMember(); member.setId(new ProjectMemberId(project.getProjectId(),user.getUserId())); member.setProject(project); member.setUser(user); member.setRole(developer); member.setAssignedAt(java.time.LocalDateTime.of(2026,1,1,0,0)); members.saveAndFlush(member);
+        }
+        int projectId=project.getProjectId(), actorId=caller.getUserId(); List<Integer> ids=List.of(a.getUserId(),b.getUserId()); var index=new java.util.concurrent.atomic.AtomicInteger();
+        var results=race(() -> { Fixtures.login(actorId); int id=ids.get(index.getAndIncrement());
+            try { return outcome(() -> { memberService.updateRole(projectId,id,manager.getRoleId()); return true; }); }
+            finally { org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
+        });
+        assertThat(results.stream().filter(value -> value.failure()==null)).hasSize(1);
+        assertThat(results.stream().filter(value -> value.failure()!=null).toList()).singleElement().satisfies(value -> assertThat(value.failure()).isInstanceOf(com.example.jira.exception.ConflictException.class));
+        assertThat(members.countOtherProjectManagers(projectId,-1)).isEqualTo(1); assertThat(roleAssignments.count()).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from project_members where assigned_at='2026-01-01 00:00:00'",Integer.class)).isEqualTo(2);
+    }
+    // Member/audit chưa được commit nếu notification giữa bước bị lỗi.
+    @Test void failedInvitationRollsBackMemberAndAudit() {
+        var target=Fixtures.user(0); target.setEmail("invited@test.invalid"); target=users.saveAndFlush(target); var role=roleRows.saveAndFlush(Fixtures.role(0,"DEVELOPER"));
+        when(security.hasPermission(project.getProjectId(),PermissionName.ADD_MEMBER)).thenReturn(true);
+        doThrow(new IllegalStateException("invite failed")).when(notifications).sendNotification(anyInt(),any(),any(),any(),anyString());
+        var request=new com.example.jira.dto.project.AddMemberRequest(); request.setUserId(target.getUserId()); request.setRoleId(role.getRoleId());
+        assertThatThrownBy(() -> memberService.addMember(project.getProjectId(),request)).hasMessageContaining("invite failed");
+        assertThat(members.count()).isZero(); assertThat(jdbc.queryForObject("select count(*) from audit_logs where action='ADD_MEMBER'",Integer.class)).isZero();
+    }
+    // Disable chặn login/refresh; mở lại vẫn cần đăng nhập mới, token cũ không sống lại.
+    @Test void disabledAccountCannotLoginOrRefreshAndReservedRoleCannotBeChanged() {
+        UserRole admin=makeAdmin(caller); var target=Fixtures.user(0); target.setEmail("disabled@test.invalid"); target.setPasswordHash(encoder.encode("old-password")); target=users.saveAndFlush(target);
+        var token=refreshService.createRefreshToken(target); accounts.enabled(target.getUserId(),false);
+        var login=new com.example.jira.dto.auth.LoginRequestDTO(); login.setEmail(target.getEmail()); login.setPassword("old-password");
+        assertThatThrownBy(() -> authService.login(login)).isInstanceOf(org.springframework.security.authentication.DisabledException.class);
+        assertThatThrownBy(() -> authService.refreshToken(token.getTokenValue())).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        accounts.enabled(target.getUserId(),true); assertThat(users.findById(target.getUserId()).orElseThrow().getAuthVersion()).isEqualTo(2);
+        assertThat(tokens.findByTokenValue(token.getTokenValue()).orElseThrow().isRevoked()).isTrue();
+        var rename=new com.example.jira.dto.user_role.UserRoleRequest(); rename.setRoleName("RENAMED");
+        assertThatThrownBy(() -> roleService.updateRole(admin.getRoleId(),rename)).isInstanceOf(com.example.jira.exception.ConflictException.class);
+        assertThatThrownBy(() -> roleService.deleteRole(admin.getRoleId())).isInstanceOf(com.example.jira.exception.ConflictException.class);
+    }
+    // Hai assignment admin của cùng một người vẫn chỉ là một admin hoạt động.
+    @Test void legacyDuplicateAdminRolesCannotBypassLastUserProtection() {
+        makeAdmin(caller); UserRole alias=roleRows.saveAndFlush(Fixtures.role(0,"system_admin"));
+        var assignment=new UserRoleAssignment(); assignment.setId(new UserRoleAssignmentId(caller.getUserId(),alias.getRoleId())); assignment.setUser(caller); assignment.setRole(alias); roleAssignments.saveAndFlush(assignment);
+        assertThat(roleAssignments.countEnabledAdmins()).isEqualTo(1);
+        assertThatThrownBy(() -> accounts.enabled(caller.getUserId(),false)).isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException.class,e -> assertThat(e.getStatusCode().value()).isEqualTo(409));
+        assertThat(users.findById(caller.getUserId()).orElseThrow().isEnabled()).isTrue();
+    }
+    private UserRole makeAdmin(User user) {
+        UserRole role=roleRows.findByRoleName("SYSTEM_ADMIN").orElseGet(() -> roleRows.saveAndFlush(Fixtures.role(0,"SYSTEM_ADMIN")));
+        var assignment=new UserRoleAssignment(); assignment.setId(new UserRoleAssignmentId(user.getUserId(),role.getRoleId())); assignment.setUser(user); assignment.setRole(role); assignment.setAssignedAt(java.time.LocalDateTime.now()); roleAssignments.saveAndFlush(assignment); return role;
     }
     // Các helper chỉ tạo fixture đã commit trong DB test; không thay thuật toán production.
     private Sprint persistedSprint(SprintState state) {

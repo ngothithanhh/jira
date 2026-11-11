@@ -1,4 +1,4 @@
-param([string]$JavaHome = 'C:\Users\Admin\.jdks\ms-17.0.20.1')
+param([string]$JavaHome = 'C:\Users\Admin\.jdks\ms-17.0.20.1', [switch]$WithUnit)
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 $pgBin = 'C:\Program Files\PostgreSQL\18\bin'
@@ -31,7 +31,9 @@ try {
     $env:JAVA_HOME = $JavaHome
     Push-Location $repo
     try {
-        & .\mvnw.cmd -B -ntp -Pintegration test-compile failsafe:integration-test failsafe:verify `
+        # WithUnit chạy cả unit và integration từ clean trong cùng lượt, vẫn chỉ dùng cluster test đã xác minh.
+        $mavenGoals = if ($WithUnit) { @('clean', 'verify') } else { @('test-compile', 'failsafe:integration-test', 'failsafe:verify') }
+        & .\mvnw.cmd -B -ntp -Pintegration @mavenGoals `
             '-Dtest.pg.url=jdbc:postgresql://127.0.0.1:55432/jira_regression' `
             '-Dtest.pg.user=regression' '-Dtest.pg.password=' "-Dtest.pg.data=$data"
         $testExit = $LASTEXITCODE

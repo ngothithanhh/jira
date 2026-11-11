@@ -31,14 +31,18 @@ public class AuthServiceImpl implements AuthService {
     private final AuthenticationManager authenticationManager;
     private final JwtUtil jwtUtil;
     private final RefreshTokenService refreshTokenService;
+    private final jakarta.persistence.EntityManager entityManager;
 
+    /** Khóa/refresh user theo email trước kiểm mật khẩu và mint token, để đổi mật khẩu không xen giữa hai bước. */
     @Override
+    @org.springframework.transaction.annotation.Transactional
     public AuthResponseDTO login(LoginRequestDTO request){
+        User found = userRepository.findByEmail(request.getEmail()).orElseThrow(() -> new org.springframework.security.authentication.BadCredentialsException("Sai thông tin đăng nhập"));
+        User user = userRepository.findByIdForUpdate(found.getUserId()).orElseThrow(() -> new org.springframework.security.authentication.BadCredentialsException("Sai thông tin đăng nhập"));
+        entityManager.refresh(user);
+        if (!user.isEnabled()) throw new org.springframework.security.authentication.DisabledException("Tài khoản bị khóa");
         authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword()));
-
-        User user = userRepository.findByEmail(request.getEmail()).orElseThrow();
-
-        String token = jwtUtil.generateToken(request.getEmail());
+        String token = jwtUtil.generateToken(user.getEmail(),user.getAuthVersion());
         RefreshToken refreshToken = refreshTokenService.createRefreshToken(user);
 
 //        System.out.println(token+"\n");
@@ -46,6 +50,7 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
+    @org.springframework.transaction.annotation.Transactional
     public AuthResponseDTO register(RegisterRequestDTO request){
 
         if(userRepository.existsByEmail(request.getEmail())){
@@ -76,14 +81,13 @@ public class AuthServiceImpl implements AuthService {
         // Việc thu hồi family đã commit trước khi trả 401 để client đăng nhập lại.
         if (result.error() != null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, result.error());
         RefreshToken next = result.token();
-        return new AuthResponseDTO(jwtUtil.generateToken(next.getUser().getEmail()), next.getTokenValue());
+        return new AuthResponseDTO(jwtUtil.generateToken(next.getUser().getEmail(),next.getUser().getAuthVersion()), next.getTokenValue());
     }
 
     @Override
     public void logout(String refreshToken){
-        RefreshToken token = refreshTokenService.verifyToken(refreshToken);
-
-        refreshTokenService.revokeToken(token);
+        // Một phiên có thể vừa rotation: thu hồi family dưới cùng khóa user, không chỉ cờ của token cha.
+        refreshTokenService.revokeSession(refreshToken);
 
     }
 

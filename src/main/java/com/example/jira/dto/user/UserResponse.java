@@ -9,6 +9,7 @@ import java.time.LocalDateTime;
 @Builder
 public class UserResponse {
     private int userId;
+    private boolean enabled;
     private String userName;
     private String email;
     private String fullName;

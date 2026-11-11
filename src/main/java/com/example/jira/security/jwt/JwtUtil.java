@@ -24,12 +24,26 @@ public class JwtUtil {
 
     // tạo token
     public String generateToken(String username) {
+        return generateToken(username,0);
+    }
+
+    /** Login/refresh truyền auth_version vừa đọc dưới khóa user để token cũ bị từ chối sau đổi mật khẩu/disable. */
+    public String generateToken(String username,long authVersion) {
         return Jwts.builder()
                 .setSubject(username)
+                .claim("ver",authVersion)
                 .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + expiration))
                 .signWith(getKey())
                 .compact();
+    }
+
+    /** Token legacy thiếu ver là 0; claim sai kiểu/âm không được dùng để xác thực. */
+    public long extractVersion(String token) {
+        Object version = extractClaims(token).get("ver");
+        if (version == null) return 0;
+        if (!(version instanceof Number number) || number.longValue() < 0) throw new IllegalArgumentException("Invalid token version");
+        return number.longValue();
     }
 
     // lấy username

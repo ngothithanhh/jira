@@ -22,9 +22,10 @@ public class UserServiceImpl implements UserService {
     private final UserRepository userRepository;
     private final PasswordConfig passwordConfig;
     private final GlobalSecurity globalSecurity;
+    private final AccountManagementService accountManagementService;
     @Override
     public UserResponse getUserById(int userId){
-        User user = userRepository.findById(userId).orElseThrow(()->new RuntimeException("Không tìm thấy người dùng!"));
+        User user = userRepository.findById(userId).orElseThrow(()->new com.example.jira.exception.NotFoundException("Không tìm thấy người dùng!"));
 
         return UserMapper.toResponseFull(user);
 
@@ -47,10 +48,11 @@ public class UserServiceImpl implements UserService {
     public void deleteUser(int userId){
         int currentUserId = SecurityUtils.getCurrentUserId();
         if(!globalSecurity.hasPermission(PermissionName.DELETE_USER)){
-            throw new RuntimeException("Bạn không có quyền xóa người dùng này!");
+            throw new org.springframework.security.access.AccessDeniedException("Bạn không có quyền xóa người dùng này!");
         }
 
-        userRepository.deleteById(userId);
+        // Dùng luồng admin có khóa/kiểm role để không đi vòng bảo vệ tài khoản quản trị cuối.
+        accountManagementService.deleteUser(userId);
 
     }
 }

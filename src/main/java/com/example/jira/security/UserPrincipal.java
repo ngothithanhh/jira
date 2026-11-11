@@ -16,6 +16,8 @@ public class UserPrincipal implements UserDetails {
     private String email;
     private String password;
     private Collection<? extends GrantedAuthority> authorities;
+    private boolean enabled = true;
+    private long authVersion;
 
 
     public UserPrincipal() {
@@ -36,12 +38,15 @@ public class UserPrincipal implements UserDetails {
                 authorities.add(new SimpleGrantedAuthority("ROLE_" + assignment.getRole().getRoleName().toUpperCase()));
             }
         }
-        return new UserPrincipal(
+        UserPrincipal principal = new UserPrincipal(
                 user.getUserId(),
                 user.getEmail(),
                 user.getPasswordHash(),
                 authorities
         );
+        // Danh tính dùng trạng thái/version hiện tại từ DB, không nhận hai giá trị này từ client.
+        principal.enabled = user.isEnabled(); principal.authVersion = user.getAuthVersion();
+        return principal;
     }
 
     public int getId() {
@@ -67,5 +72,6 @@ public class UserPrincipal implements UserDetails {
     @Override public boolean isAccountNonExpired() { return true; }
     @Override public boolean isAccountNonLocked() { return true; }
     @Override public boolean isCredentialsNonExpired() { return true; }
-    @Override public boolean isEnabled() { return true; }
+    public long getAuthVersion() { return authVersion; }
+    @Override public boolean isEnabled() { return enabled; }
 }

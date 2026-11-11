@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.*;
         IssueCommentController.class, IssueAttachmentController.class, IssueTypeController.class,
         IssueStatusController.class, UserRoleController.class, PermissionController.class,
         RolePermissionController.class, WorkflowController.class, BoardController.class,
-        SprintController.class, NotificationController.class, BacklogController.class, BoardCardController.class, IssueQueryController.class, ContainerManagementController.class, ScrumReportController.class}, properties = {
+        SprintController.class, NotificationController.class, BacklogController.class, BoardCardController.class, IssueQueryController.class, ContainerManagementController.class, ScrumReportController.class, AccountManagementController.class}, properties = {
         "app.jwt.secret=" + SecurityRegressionTest.SECRET, "app.jwt.expiration=60000"})
 @Import({SecurityConfig.class, JwtUtil.class, CorsConfig.class})
 class ApiRegressionTest {
@@ -63,6 +63,38 @@ class ApiRegressionTest {
     @MockBean com.example.jira.service.impl.IssueQueryService queryIssues;
     @MockBean com.example.jira.service.impl.ContainerManagementService containers;
     @MockBean com.example.jira.service.impl.ScrumReportService reports;
+    @MockBean com.example.jira.service.impl.AccountManagementService accounts;
+
+    @Test void oldJwtVersionIsRejectedAndNewVersionIsAccepted() throws Exception {
+        var user=Fixtures.user(1); user.setAuthVersion(1);
+        when(details.loadUserByUsername(user.getEmail())).thenReturn(UserPrincipal.fromUser(user));
+        mvc.perform(get("/api/projects/getList").header("Authorization","Bearer " + jwt.generateToken(user.getEmail(),0))).andExpect(status().isUnauthorized());
+        verifyNoInteractions(projects);
+        mvc.perform(get("/api/projects/getList").header("Authorization","Bearer " + jwt.generateToken(user.getEmail(),1))).andExpect(status().isOk());
+    }
+    @Test void disabledAccountJwtCannotReachController() throws Exception {
+        var user=Fixtures.user(1); user.setEnabled(false);
+        when(details.loadUserByUsername(user.getEmail())).thenReturn(UserPrincipal.fromUser(user));
+        mvc.perform(get("/api/projects/getList").header("Authorization","Bearer " + jwt.generateToken(user.getEmail()))).andExpect(status().isUnauthorized());
+        verifyNoInteractions(projects);
+    }
+    @Test void accountRoutesPreserveIdentityAndTargetRoleIds() throws Exception {
+        mvc.perform(patch("/api/account/profile").header("Authorization",bearer()).contentType(MediaType.APPLICATION_JSON).content("{\"fullName\":\"Display\"}")).andExpect(status().isOk());
+        mvc.perform(post("/api/account/password").header("Authorization",bearer()).contentType(MediaType.APPLICATION_JSON).content("{\"oldPassword\":\"old-password\",\"newPassword\":\"new-password\"}")).andExpect(status().isNoContent());
+        mvc.perform(get("/api/admin/users/2/roles").header("Authorization",bearer())).andExpect(status().isOk());
+        mvc.perform(put("/api/admin/users/2/roles/7").header("Authorization",bearer())).andExpect(status().isNoContent());
+        mvc.perform(delete("/api/admin/users/2/roles/7").header("Authorization",bearer())).andExpect(status().isNoContent());
+        mvc.perform(patch("/api/admin/users/2/enabled").header("Authorization",bearer()).contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":false}")).andExpect(status().isNoContent());
+        mvc.perform(put("/api/projects/10/members/2/role").header("Authorization",bearer()).contentType(MediaType.APPLICATION_JSON).content("{\"roleId\":7}")).andExpect(status().isNoContent());
+        verify(accounts).profile(argThat(body -> "Display".equals(body.fullName()))); verify(accounts).password(any());
+        verify(accounts).roles(2); verify(accounts).grantRole(2,7); verify(accounts).revokeRole(2,7); verify(accounts).enabled(2,false); verify(members).updateRole(10,2,7);
+    }
+    @Test void accountBodyValidationRejectsMissingValues() throws Exception {
+        mvc.perform(post("/api/account/password").header("Authorization",bearer()).contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isBadRequest());
+        mvc.perform(patch("/api/admin/users/2/enabled").header("Authorization",bearer()).contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isBadRequest());
+        mvc.perform(put("/api/projects/10/members/2/role").header("Authorization",bearer()).contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isBadRequest());
+        verifyNoInteractions(accounts);
+    }
 
     @Test void reportRoutesUseSprintAndProjectScopes() throws Exception {
         mvc.perform(get("/api/sprints/100/reports/summary").header("Authorization",bearer())).andExpect(status().isOk());

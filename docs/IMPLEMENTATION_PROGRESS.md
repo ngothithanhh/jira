@@ -20,8 +20,8 @@ Người dùng đã duyệt plan sửa bug và cho phép tiếp tục tự độ
 | 3 | Issue trên board, di chuyển, vị trí và WIP | 281 unit/HTTP + 20 PostgreSQL đạt; đã tự kiểm tra | ecf3e56 |
 | 4 | Chi tiết/xóa issue, tìm kiếm, lọc, phân trang | 303 unit/HTTP + 26 PostgreSQL đạt; đã tự kiểm tra | a985353 |
 | 5 | Sửa/xóa sprint, board, column | 319 unit/HTTP + 30 PostgreSQL đạt; đã tự kiểm tra | f777900 |
-| 6 | Tổng kết sprint, velocity, burndown | 334 unit/HTTP + 33 PostgreSQL đạt; đã tự kiểm tra | Xem git log |
-| 7 | Quản lý người dùng/tài khoản, vai trò thành viên | Chờ plan chi tiết | Chưa commit |
+| 6 | Tổng kết sprint, velocity, burndown | 334 unit/HTTP + 33 PostgreSQL đạt; đã tự kiểm tra | acfe3fe |
+| 7 | Quản lý người dùng/tài khoản, vai trò thành viên | Clean verify: 354 unit/HTTP + 43 PostgreSQL đạt; đã tự kiểm tra | Xem git log |
 | 8 | Sửa/xóa comment, notification, tra cứu audit | Chờ plan chi tiết | Chưa commit |
 
 ## Điều kiện ghi nhận hoàn tất

@@ -4,6 +4,7 @@ import com.example.jira.entity.RefreshToken;
 import com.example.jira.entity.User;
 
 public interface RefreshTokenService {
+    void revokeSession(String tokenValue);
     // Kết quả trả sau khi transaction hoàn tất để lỗi reuse không rollback việc thu hồi family.
     record RotationResult(RefreshToken token, String error) { }
 

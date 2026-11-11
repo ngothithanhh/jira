@@ -8,6 +8,9 @@ import java.util.List;
 import java.util.Optional;
 
 public interface ProjectMemberRepository extends JpaRepository<ProjectMember, ProjectMemberId> {
+    @org.springframework.data.jpa.repository.Query("select count(m) from ProjectMember m where m.project.projectId = :projectId and upper(m.role.roleName) = 'PROJECT_MANAGER' and m.user.userId <> :excludedUserId")
+    long countOtherProjectManagers(@org.springframework.data.repository.query.Param("projectId") int projectId,
+            @org.springframework.data.repository.query.Param("excludedUserId") int excludedUserId);
     List<ProjectMember> findByProject_ProjectId(int projectId);
     Optional<ProjectMember> findByProject_ProjectIdAndUser_UserId(int projectId, int userId);
     boolean existsByProject_ProjectIdAndRole_RoleName(int projectId, String roleName);

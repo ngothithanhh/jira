@@ -7,6 +7,11 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.List;
 
 public interface UserRoleAssignmentRepository extends JpaRepository<UserRoleAssignment, UserRoleAssignmentId> {
+    // Đếm người, không đếm assignment: legacy có thể gán hai role khác hoa/thường cho cùng một admin.
+    @org.springframework.data.jpa.repository.Query("select count(distinct a.user.userId) from UserRoleAssignment a where upper(a.role.roleName) = 'SYSTEM_ADMIN' and a.user.enabled = true")
+    long countEnabledAdmins();
+    @org.springframework.data.jpa.repository.Query("select (count(a)>0) from UserRoleAssignment a where a.user.userId = :userId and upper(a.role.roleName) = 'SYSTEM_ADMIN'")
+    boolean isAdmin(@org.springframework.data.repository.query.Param("userId") int userId);
     List<UserRoleAssignment> findByUser_UserId(int userId);
 
     List<UserRoleAssignment> findByRole_RoleName(String roleName);

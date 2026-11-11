@@ -16,6 +16,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class RefreshTokenServiceImpl implements RefreshTokenService {
     private final RefreshTokenRepository refreshTokenRepository;
+    private final com.example.jira.repository.UserRepository userRepository;
+    private final jakarta.persistence.EntityManager entityManager;
     private static final int REFRESH_TOKEN_EXP_DAYS = 7;
     /**
      * Dùng khi AuthService nhận refresh token từ client. tokenValue xác định phiên của users qua user_id.
@@ -28,8 +30,16 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
     public RotationResult consumeAndRotate(String tokenValue) {
         // Giá trị rỗng không được dùng để tra cứu hoặc cấp một phiên mới.
         if (tokenValue == null || tokenValue.isBlank()) return new RotationResult(null, "Refresh token missing");
+        // Lần đọc đầu chỉ lấy user_id; khóa user trước token để không deadlock với đổi mật khẩu/disable.
+        RefreshToken candidate = refreshTokenRepository.findByTokenValue(tokenValue).orElse(null);
+        if (candidate == null) return new RotationResult(null,"Refresh token not found");
+        User owner = lockOwner(candidate);
+        if (owner == null) return new RotationResult(null,"Refresh token owner missing");
         RefreshToken old = refreshTokenRepository.findByTokenValueForUpdate(tokenValue).orElse(null);
         if (old == null) return new RotationResult(null, "Refresh token not found");
+        // Bỏ dữ liệu managed đã đọc trước lúc chờ user lock, rồi mới xét revoked và hạn dùng.
+        entityManager.refresh(old); old.setUser(owner);
+        if (!owner.isEnabled()) { revokeFamily(old.getFamilyId()); return new RotationResult(null,"Account disabled"); }
         // Lượt sau thấy revoked chỉ được thu hồi family, không được tạo thêm token con.
         if (old.isRevoked()) {
             revokeFamily(old.getFamilyId());
@@ -40,6 +50,24 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
         }
         old.setLastUsedAt(LocalDateTime.now());
         return new RotationResult(rotateRefreshToken(old), null);
+    }
+
+    /** Logout theo token trong body, khóa user rồi token và thu hồi cả family; token không còn tồn tại là no-op. */
+    @Override @Transactional
+    public void revokeSession(String tokenValue) {
+        if (tokenValue == null || tokenValue.isBlank()) return;
+        RefreshToken candidate = refreshTokenRepository.findByTokenValue(tokenValue).orElse(null);
+        if (candidate == null || lockOwner(candidate) == null) return;
+        RefreshToken token = refreshTokenRepository.findByTokenValueForUpdate(tokenValue).orElse(null);
+        if (token != null) { entityManager.refresh(token); revokeFamily(token.getFamilyId()); }
+    }
+
+    /** user_id đến từ refresh_tokens vừa tra, không từ client; refresh sau khóa để dùng enabled/auth_version mới nhất. */
+    private User lockOwner(RefreshToken candidate) {
+        if (candidate.getUser() == null) return null;
+        User user = userRepository.findByIdForUpdate(candidate.getUser().getUserId()).orElse(null);
+        if (user != null) entityManager.refresh(user);
+        return user;
     }
     @Override
     public RefreshToken createRefreshToken(User user){

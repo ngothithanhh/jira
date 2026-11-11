@@ -51,6 +51,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         || !jwtUtil.validateToken(token, userDetails.getUsername())) {
                     throw new BadCredentialsException("JWT hoặc tài khoản không hợp lệ");
                 }
+                // Đổi mật khẩu/khóa tài khoản tăng auth_version trong DB; token version cũ dừng ngay trước controller.
+                if (!(userDetails instanceof com.example.jira.security.UserPrincipal principal)
+                        || jwtUtil.extractVersion(token) != principal.getAuthVersion()) throw new BadCredentialsException("JWT version cũ");
 
                 // Danh tính lấy từ users theo email đã ký, không lấy từ tham số userId của request.
                 var authentication = new UsernamePasswordAuthenticationToken(

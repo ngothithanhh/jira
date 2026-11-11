@@ -42,6 +42,8 @@ public class UserRoleServiceImpl implements UserRoleService {
         // Chặn user thường trước khi tra ID mục tiêu; biết ID role/quyền không cho phép tự nâng quyền.
         globalSecurity.assertSystemAdmin();
 
+        // SYSTEM_ADMIN được seeder tạo và dùng làm khóa quản trị; không tạo bản sao khác chữ hoa/thường qua API.
+        if ("SYSTEM_ADMIN".equalsIgnoreCase(request.getRoleName())) throw new ConflictException("SYSTEM_ADMIN là vai trò dành riêng");
         if(userRoleRepository.existsByRoleName(request.getRoleName()))
             throw new ConflictException("Vai trò đã tồn tại!");
 
@@ -61,6 +63,8 @@ public class UserRoleServiceImpl implements UserRoleService {
         globalSecurity.assertSystemAdmin();
         UserRole userRole = userRoleRepository.findByRoleId(roleId).orElseThrow(()->new NotFoundException("Không tìm thấy vai trò!"));
 
+        // Không đổi vai trò khác thành admin hoặc đổi mất tên admin đang bảo vệ last-admin/khóa quản trị.
+        if ("SYSTEM_ADMIN".equalsIgnoreCase(userRole.getRoleName()) || "SYSTEM_ADMIN".equalsIgnoreCase(request.getRoleName())) throw new ConflictException("Không đổi tên vai trò SYSTEM_ADMIN");
         userRole.setRoleName(request.getRoleName());
 
         return UserRoleMapper.toResponse(userRoleRepository.save(userRole));
@@ -74,6 +78,7 @@ public class UserRoleServiceImpl implements UserRoleService {
     public void deleteRole(int roleId){
         // Chặn user thường trước khi tra ID mục tiêu; biết ID role/quyền không cho phép tự nâng quyền.
         globalSecurity.assertSystemAdmin();
+        if (userRoleRepository.findByRoleId(roleId).filter(role -> "SYSTEM_ADMIN".equalsIgnoreCase(role.getRoleName())).isPresent()) throw new ConflictException("Không xóa vai trò SYSTEM_ADMIN");
         if (userRoleAssignmentRepository.existsByRole_RoleId(roleId) || projectMemberRepository.existsByRole_RoleId(roleId)) {
             throw new ConflictException("Không thể xóa vai trò này vì đang được gán cho người dùng hoặc dự án!");
         }

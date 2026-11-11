@@ -25,6 +25,7 @@ class AuthRegressionTest {
 
     @Nested @ExtendWith(MockitoExtension.class)
     class Account {
+        @Mock jakarta.persistence.EntityManager entityManager;
         @Mock UserRepository users;
         @Mock AuthenticationManager manager;
         @Mock JwtUtil jwt;
@@ -55,17 +56,20 @@ class AuthRegressionTest {
         // Sai mật khẩu dừng ở AuthenticationManager, không cấp phiên làm việc.
         @Test void wrongPasswordDoesNotIssueTokens() {
             var req = new LoginRequestDTO(); req.setEmail("a@test.invalid"); req.setPassword("wrong");
+            var user = Fixtures.user(1);
+            when(users.findByEmail(req.getEmail())).thenReturn(Optional.of(user)); when(users.findByIdForUpdate(1)).thenReturn(Optional.of(user));
             when(manager.authenticate(any())).thenThrow(new BadCredentialsException("wrong password"));
             assertThatThrownBy(() -> service.login(req)).isInstanceOf(BadCredentialsException.class);
-            verifyNoInteractions(tokens, jwt, users);
+            verifyNoInteractions(tokens, jwt);
         }
         // Đăng nhập hợp lệ dùng đúng email đã xác thực để tìm user và tạo token.
         @Test void loginIssuesTokensForAuthenticatedUser() {
             var req = new LoginRequestDTO(); req.setEmail("user1@test.invalid"); req.setPassword("password");
             var u = Fixtures.user(1); var token = new RefreshToken(); token.setTokenValue("refresh");
             when(users.findByEmail(req.getEmail())).thenReturn(Optional.of(u));
+            when(users.findByIdForUpdate(1)).thenReturn(Optional.of(u));
             when(tokens.createRefreshToken(u)).thenReturn(token);
-            when(jwt.generateToken(req.getEmail())).thenReturn("access");
+            when(jwt.generateToken(req.getEmail(),0)).thenReturn("access");
             assertThat(service.login(req)).isNotNull();
             verify(manager).authenticate(any()); verify(tokens).createRefreshToken(u);
         }
@@ -75,7 +79,7 @@ class AuthRegressionTest {
             when(tokens.consumeAndRotate("old")).thenReturn(new RefreshTokenService.RotationResult(next, null));
             service.refreshToken("old");
             var order = inOrder(tokens, jwt); order.verify(tokens).consumeAndRotate("old");
-            order.verify(jwt).generateToken("user1@test.invalid");
+            order.verify(jwt).generateToken("user1@test.invalid",0);
         }
         // Reuse đã được ghi nhận trong transaction phải trả 401 và không cấp access token.
         @Test void reuseDoesNotIssueAccessToken() {
@@ -85,8 +89,7 @@ class AuthRegressionTest {
         }
         // Logout chỉ thu hồi token đã qua kiểm tra.
         @Test void logoutRevokesVerifiedToken() {
-            var token = new RefreshToken(); when(tokens.verifyToken("value")).thenReturn(token);
-            service.logout("value"); verify(tokens).revokeToken(token);
+            service.logout("value"); verify(tokens).revokeSession("value");
         }
         // /me trả danh tính từ context thay vì nhận ID tùy ý của client.
         @Test void currentUserUsesAuthenticatedEmail() {
@@ -97,11 +100,17 @@ class AuthRegressionTest {
 
     @Nested @ExtendWith(MockitoExtension.class)
     class RefreshTokens {
+        @Mock UserRepository users;
+        @Mock jakarta.persistence.EntityManager entityManager;
+        @BeforeEach void ownerLock() {
+            lenient().when(users.findByIdForUpdate(1)).thenReturn(Optional.of(Fixtures.user(1)));
+        }
         @Mock RefreshTokenRepository repository;
         @InjectMocks RefreshTokenServiceImpl service;
         // Token khóa được còn hạn chỉ sinh một con cùng family và thu hồi bản cũ.
         @Test void atomicRotationConsumesLockedToken() {
             var old = new RefreshToken(); old.setUser(Fixtures.user(1)); old.setFamilyId("A"); old.setExpiresAt(LocalDateTime.now().plusDays(1));
+            when(repository.findByTokenValue("old")).thenReturn(Optional.of(old));
             when(repository.findByTokenValueForUpdate("old")).thenReturn(Optional.of(old));
             when(repository.save(any())).thenAnswer(i -> i.getArgument(0));
             var result = service.consumeAndRotate("old"); assertThat(result.error()).isNull();
@@ -109,9 +118,10 @@ class AuthRegressionTest {
         }
         // Lượt thứ hai dùng token cũ trả lỗi sau khi thu hồi các token cùng family.
         @Test void atomicReuseCommitsFamilyRevocationResult() {
-            var old = new RefreshToken(); old.setRevoked(true); old.setFamilyId("A");
+            var old = new RefreshToken(); old.setUser(Fixtures.user(1)); old.setRevoked(true); old.setFamilyId("A");
             var child = new RefreshToken(); child.setFamilyId("A");
             when(repository.findByTokenValueForUpdate("old")).thenReturn(Optional.of(old));
+            when(repository.findByTokenValue("old")).thenReturn(Optional.of(old));
             when(repository.findByFamilyId("A")).thenReturn(List.of(old, child));
             assertThat(service.consumeAndRotate("old").error()).contains("reuse");
             assertThat(child.isRevoked()).isTrue(); verify(repository, never()).save(any());

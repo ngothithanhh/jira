@@ -82,6 +82,10 @@ class ProjectRegressionTest {
     }
     @Nested @ExtendWith(MockitoExtension.class)
     class Members {
+        @Mock jakarta.persistence.EntityManager entityManager;
+        @BeforeEach void projectLock() {
+            lenient().when(projects.findByIdForUpdate(10)).thenReturn(Optional.of(Fixtures.project(10)));
+        }
         @Mock ProjectRepository projects;
         @Mock UserRepository users;
         @Mock ProjectMemberRepository members;
@@ -91,6 +95,19 @@ class ProjectRegressionTest {
         @Mock AuditLogService audit;
         @Mock NotificationService notifications;
         @InjectMocks ProjectMemberServiceImpl service;
+        // Đổi role project giữ thời điểm tham gia và không cấp role toàn cục.
+        @Test void memberRoleUpdatePreservesAssignedAt() {
+            var member=new ProjectMember(); member.setAssignedAt(java.time.LocalDateTime.of(2026,1,1,0,0)); var assigned=member.getAssignedAt();
+            when(members.findByProject_ProjectIdAndUser_UserId(10,2)).thenReturn(Optional.of(member));
+            when(roles.findByRoleId(7)).thenReturn(Optional.of(Fixtures.role(7,"DEVELOPER")));
+            service.updateRole(10,2,7); assertThat(member.getRole().getRoleId()).isEqualTo(7); assertThat(member.getAssignedAt()).isEqualTo(assigned); verifyNoInteractions(assignments);
+        }
+        // SYSTEM_ADMIN không phải một role project mới, tránh nhầm assignment toàn cục với membership.
+        @Test void projectCannotReceiveSystemAdminRole() {
+            when(members.findByProject_ProjectIdAndUser_UserId(10,2)).thenReturn(Optional.of(new ProjectMember()));
+            when(roles.findByRoleId(7)).thenReturn(Optional.of(Fixtures.role(7,"SYSTEM_ADMIN")));
+            assertThatThrownBy(() -> service.updateRole(10,2,7)).isInstanceOf(com.example.jira.exception.ConflictException.class); verify(members,never()).save(any());
+        }
         // Thiếu ADD_MEMBER dừng trước khi đọc user và role.
         @Test void deniedAddDoesNotReadOrWriteMember() {
             assertThatThrownBy(() -> service.addMember(10, new AddMemberRequest())).hasMessageContaining("quyền");
@@ -112,7 +129,7 @@ class ProjectRegressionTest {
         }
         // Project có PM rồi không được thêm PM thứ hai.
         @Test void secondProjectManagerIsRejected() {
-            prepareAdd("PROJECT_MANAGER"); when(members.existsByProject_ProjectIdAndRole_RoleName(10, "PROJECT_MANAGER")).thenReturn(true);
+            prepareAdd("PROJECT_MANAGER"); when(members.countOtherProjectManagers(10,2)).thenReturn(1L);
             assertThatThrownBy(() -> service.addMember(10, request())).hasMessageContaining("MANAGER");
             verify(members, never()).save(any());
         }
@@ -138,6 +155,7 @@ class ProjectRegressionTest {
     }
     @Nested @ExtendWith(MockitoExtension.class)
     class Users {
+        @Mock AccountManagementService accounts;
         @Mock UserRepository repository;
         @Mock PasswordConfig passwords;
         @Mock GlobalSecurity global;
@@ -157,7 +175,7 @@ class ProjectRegressionTest {
         // Có quyền xóa chỉ tác động user được yêu cầu.
         @Test void authorizedDeleteUsesRequestedId() {
             when(global.hasPermission(PermissionName.DELETE_USER)).thenReturn(true);
-            service.deleteUser(2); verify(repository).deleteById(2);
+            service.deleteUser(2); verify(accounts).deleteUser(2); verify(repository,never()).deleteById(anyInt());
         }
     }
 }

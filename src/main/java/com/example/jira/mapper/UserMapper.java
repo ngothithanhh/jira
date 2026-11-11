@@ -18,6 +18,7 @@ public class UserMapper {
     public static UserResponse toResponseFull(User user){
         return UserResponse.builder()
                 .userId(user.getUserId())
+                .enabled(user.isEnabled())
                 .fullName(user.getFullName())
                 .email(user.getEmail())
                 .userName(user.getUserName())

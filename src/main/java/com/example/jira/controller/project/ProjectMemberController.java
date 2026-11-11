@@ -15,9 +15,17 @@ import java.util.List;
 @RequestMapping("/api/projects/{projectId}/members")
 @RequiredArgsConstructor
 public class ProjectMemberController {
+    public record ChangeRoleRequest(@jakarta.validation.constraints.Positive int roleId) { }
     private final ProjectMemberService projectMemberService;
     private final PermissionService permissionService;
     private final AuthService authService;
+
+    /** roleId thuộc user_roles; service đổi đúng member project/user, không cấp role toàn cục. */
+    @PutMapping("/{userId}/role")
+    @ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
+    public void updateRole(@PathVariable int projectId,@PathVariable int userId,@jakarta.validation.Valid @RequestBody ChangeRoleRequest body) {
+        projectMemberService.updateRole(projectId,userId,body.roleId());
+    }
 
     @PostMapping
     public void addMember(@PathVariable int projectId, @RequestBody AddMemberRequest request){

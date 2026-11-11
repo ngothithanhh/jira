@@ -31,6 +31,12 @@ public class User {
     @Column(name = "password_hash", nullable = false)
     private String passwordHash;
 
+    @Column(nullable=false)
+    private boolean enabled = true;
+    // Tăng khi đổi mật khẩu/khóa tài khoản để JWT đã cấp không còn dùng được.
+    @Column(name="auth_version",nullable=false)
+    private long authVersion;
+
     @Column(name = "full_name", length = 100)
     private String fullName;
 

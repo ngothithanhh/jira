@@ -19,6 +19,7 @@ import com.example.jira.exception.ConflictException;
 import org.springframework.security.access.AccessDeniedException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -34,9 +35,11 @@ public class ProjectMemberServiceImpl implements ProjectMemberService {
     private final ProjectSecurity projectSecurity;
     private final AuditLogService auditLogService;
     private final NotificationService notificationService;
+    private final jakarta.persistence.EntityManager entityManager;
 
     /** projectId là ID projects, request.userId là người được thêm và roleId là ID user_roles. Kiểm ADD_MEMBER trước khi đọc/ghi; lưu project_members rồi audit và thông báo người được thêm. */
     @Override
+    @Transactional
     public void addMember(int projectId, AddMemberRequest request){
 
         // Thiếu quyền trên bên sở hữu dữ liệu thì dừng bằng 403, không thực hiện các cập nhật bên dưới.
@@ -44,13 +47,15 @@ public class ProjectMemberServiceImpl implements ProjectMemberService {
             throw new AccessDeniedException("Bạn không có quyền thêm thành viên vào dự án này!");
 
         Project project = projectRepository.findById(projectId).orElseThrow(()->new NotFoundException("Không tìm thấy dự án!"));
+        // Tuần tự hóa add/đổi PM trong cùng project, giữ khóa qua audit/notification để lỗi rollback toàn bộ.
+        project = lockProject(projectId);
 
         User user = userRepository.findById(request.getUserId()).orElseThrow(()->new NotFoundException("Không tìm thấy người dùng!"));
 
         UserRole userRole = userRoleRepositoty.findByRoleId(request.getRoleId()).orElseThrow(()->new NotFoundException("Không tìm thấy vai trò!"));
-
-        if(userRole.getRoleName().equals("PROJECT_MANAGER")){
-            if(projectMemberRepository.existsByProject_ProjectIdAndRole_RoleName(projectId,"PROJECT_MANAGER")){
+        requireProjectRole(userRole);
+        if(userRole.getRoleName().equalsIgnoreCase("PROJECT_MANAGER")){
+            if(projectMemberRepository.countOtherProjectManagers(projectId,request.getUserId())>0){
                 throw new ConflictException("Đã có PROJECT MANAGER!");
             }
         }
@@ -93,15 +98,46 @@ public class ProjectMemberServiceImpl implements ProjectMemberService {
 
     /** projectId/userId là cặp khóa project_members cần gỡ, khác ID người gọi. Thiếu DELETE_MEMBER thì 403; đủ quyền mới xóa đúng cặp và ghi audit. */
     @Override
+    @Transactional
     public void removeMember(int projectId, int userId){
 
         // Thiếu quyền trên bên sở hữu dữ liệu thì dừng bằng 403, không thực hiện các cập nhật bên dưới.
         if(!projectSecurity.hasPermission(projectId, PermissionName.DELETE_MEMBER))
             throw new AccessDeniedException("Bạn không có quyền xóa thành viên khỏi dự án này!");
 
+        Project project = lockProject(projectId);
+        if (project.getLead()!=null && project.getLead().getUserId()==userId) throw new ConflictException("Không gỡ lead khi projects vẫn chỉ định người này");
         ProjectMemberId id = new ProjectMemberId(projectId,userId);
         projectMemberRepository.deleteById(id);
         
         auditLogService.logAction("REMOVE_MEMBER", EntityType.PROJECT, projectId, "Xóa người dùng ID " + userId + " khỏi dự án");
+    }
+
+    /**
+     * Đổi role của cặp project_members theo projectId/userId trên URL; roleId là user_roles, không phải gán toàn cục.
+     * ADD_MEMBER trên project, khóa project rồi kiểm member/role/PM khác trước ghi; giữ assigned_at.
+     * Không cho SYSTEM_ADMIN làm role project mới; lỗi audit rollback role, không tự retry.
+     */
+    @Override @Transactional
+    public void updateRole(int projectId,int userId,int roleId) {
+        projectSecurity.requirePermission(projectId,PermissionName.ADD_MEMBER); lockProject(projectId);
+        ProjectMember member = projectMemberRepository.findByProject_ProjectIdAndUser_UserId(projectId,userId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy thành viên"));
+        entityManager.refresh(member);
+        UserRole role = userRoleRepositoty.findByRoleId(roleId).orElseThrow(() -> new NotFoundException("Không tìm thấy vai trò"));
+        requireProjectRole(role);
+        if ("PROJECT_MANAGER".equalsIgnoreCase(role.getRoleName()) && projectMemberRepository.countOtherProjectManagers(projectId,userId)>0) throw new ConflictException("Đã có PROJECT MANAGER!");
+        member.setRole(role); projectMemberRepository.save(member);
+        auditLogService.logAction("UPDATE_MEMBER_ROLE",EntityType.PROJECT,projectId,"Đổi role user ID " + userId + " sang role ID " + roleId);
+    }
+
+    /** Khóa projects trong transaction của caller; refresh để kiểm lead từ hàng mới nhất sau khi chờ. */
+    private Project lockProject(int projectId) {
+        Project project = projectRepository.findByIdForUpdate(projectId).orElseThrow(() -> new NotFoundException("Không tìm thấy dự án!"));
+        entityManager.refresh(project); return project;
+    }
+    /** SYSTEM_ADMIN chỉ có nghĩa toàn cục, không gán mới vào project_members để tránh nhầm quyền. */
+    private void requireProjectRole(UserRole role) {
+        if ("SYSTEM_ADMIN".equalsIgnoreCase(role.getRoleName())) throw new ConflictException("SYSTEM_ADMIN không phải vai trò thành viên dự án");
     }
 }

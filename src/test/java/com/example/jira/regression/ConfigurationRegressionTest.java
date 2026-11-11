@@ -30,6 +30,16 @@ class ConfigurationRegressionTest {
         @Mock UserRoleAssignmentRepository assignments;
         @Mock ProjectMemberRepository members;
         @InjectMocks UserRoleServiceImpl service;
+        // Vai trò khóa quản trị không được tạo bản sao/đổi tên/xóa qua API cấu hình chung.
+        @Test void systemAdminRoleIsReserved() {
+            var request=new UserRoleRequest(); request.setRoleName("system_admin");
+            assertThatThrownBy(() -> service.createRole(request)).isInstanceOf(com.example.jira.exception.ConflictException.class);
+            when(roles.findByRoleId(7)).thenReturn(Optional.of(Fixtures.role(7,"SYSTEM_ADMIN")));
+            request.setRoleName("RENAMED");
+            assertThatThrownBy(() -> service.updateRole(7,request)).isInstanceOf(com.example.jira.exception.ConflictException.class);
+            assertThatThrownBy(() -> service.deleteRole(7)).isInstanceOf(com.example.jira.exception.ConflictException.class);
+            verify(roles,never()).save(any()); verify(roles,never()).deleteById(anyInt());
+        }
         // Tên role trùng không được tạo bản ghi mới.
         @Test void duplicateRoleIsRejected() {
             when(roles.existsByRoleName("DEVELOPER")).thenReturn(true);

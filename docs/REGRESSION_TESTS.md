@@ -3,7 +3,7 @@
 ## Phạm vi và giới hạn
 
 Bộ test bao phủ các chức năng đang triển khai trong backend Spring Boot. Chưa có frontend trong checkout này.
-Không viết test cho API chưa tồn tại: đổi/quên mật khẩu. Product/sprint backlog, board cards/move, chi tiết/xóa issue, tìm kiếm/phân trang và báo cáo Scrum đã có API/test; xem các tài liệu API trong docs, gồm SCRUM_REPORT_API.md.
+Không viết test cho API chưa tồn tại như quên mật khẩu qua email. Đổi mật khẩu đã đăng nhập, profile/trạng thái tài khoản/global role và member role đã có API/test; xem ACCOUNT_MANAGEMENT_API.md. Các API backlog/board/issue/report cũng có tài liệu/test riêng.
 Không coi coverage cao hoặc mọi test xanh là bằng chứng đã hết bug.
 
 - Unit: JUnit 5, Mockito, AssertJ. Dùng SecurityContext thật với UserPrincipal giả lập.
@@ -59,6 +59,8 @@ Máy Windows này cũng có thể dùng PostgreSQL 18 đã cài khi Docker engin
 ```powershell
 .\scripts\test-postgres.ps1
 ```
+
+Muốn chạy clean toàn bộ unit/MockMvc và PostgreSQL trong một lượt: `.\scripts\test-postgres.ps1 -WithUnit`. Script vẫn kiểm đúng cluster mới trước DDL, không chuyển sang DB triển khai.
 
 Script tạo cluster mới `../test-postgres-{GUID}/data`, bind loopback cổng 55432; cổng bận thì dừng. Trước Hibernate DDL, test xác minh đúng URL, user, tên DB và data_directory của cluster vừa tạo. Script dừng đúng cluster đó sau Maven, giữ log để kiểm tra. Không tái sử dụng DB triển khai. Có thể truyền `-JavaHome` để chọn JDK 17 khác; đường dẫn PostgreSQL hiện cấu hình cho máy Windows này trong script.
 
