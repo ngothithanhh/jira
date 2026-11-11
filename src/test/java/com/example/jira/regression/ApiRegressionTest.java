@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.*;
         IssueCommentController.class, IssueAttachmentController.class, IssueTypeController.class,
         IssueStatusController.class, UserRoleController.class, PermissionController.class,
         RolePermissionController.class, WorkflowController.class, BoardController.class,
-        SprintController.class, NotificationController.class, BacklogController.class, BoardCardController.class, IssueQueryController.class}, properties = {
+        SprintController.class, NotificationController.class, BacklogController.class, BoardCardController.class, IssueQueryController.class, ContainerManagementController.class}, properties = {
         "app.jwt.secret=" + SecurityRegressionTest.SECRET, "app.jwt.expiration=60000"})
 @Import({SecurityConfig.class, JwtUtil.class, CorsConfig.class})
 class ApiRegressionTest {
@@ -61,6 +61,25 @@ class ApiRegressionTest {
     @MockBean com.example.jira.service.impl.BacklogService backlog;
     @MockBean com.example.jira.service.impl.BoardCardService cards;
     @MockBean com.example.jira.service.impl.IssueQueryService queryIssues;
+    @MockBean com.example.jira.service.impl.ContainerManagementService containers;
+
+    @Test void containerRoutesCallCorrectScope() throws Exception {
+        mvc.perform(patch("/api/sprints/100").header("Authorization",bearer()).contentType(MediaType.APPLICATION_JSON).content("{\"goal\":\"Ship\"}")).andExpect(status().isOk());
+        mvc.perform(patch("/api/boards/50").header("Authorization",bearer()).contentType(MediaType.APPLICATION_JSON).content("{\"boardName\":\"Team\"}")).andExpect(status().isNoContent());
+        mvc.perform(patch("/api/boards/columns/60").header("Authorization",bearer()).contentType(MediaType.APPLICATION_JSON).content("{\"wipLimit\":2}")).andExpect(status().isNoContent());
+        mvc.perform(delete("/api/sprints/100").header("Authorization",bearer())).andExpect(status().isNoContent());
+        mvc.perform(delete("/api/boards/50").header("Authorization",bearer())).andExpect(status().isNoContent());
+        mvc.perform(delete("/api/boards/columns/60").header("Authorization",bearer())).andExpect(status().isNoContent());
+        verify(containers).updateSprint(eq(100),argThat(request -> "Ship".equals(request.getGoal())));
+        verify(containers).updateBoard(eq(50),argThat(request -> "Team".equals(request.getBoardName())));
+        verify(containers).updateColumn(eq(60),argThat(request -> request.getWipLimit() == 2));
+        verify(containers).deleteSprint(100); verify(containers).deleteBoard(50); verify(containers).deleteColumn(60);
+    }
+    @Test void containerBodyValidationRejectsInvalidValues() throws Exception {
+        mvc.perform(patch("/api/boards/50").header("Authorization",bearer()).contentType(MediaType.APPLICATION_JSON).content("{\"boardName\":\" \"}")).andExpect(status().isBadRequest());
+        mvc.perform(patch("/api/boards/columns/60").header("Authorization",bearer()).contentType(MediaType.APPLICATION_JSON).content("{\"wipLimit\":-1}")).andExpect(status().isBadRequest());
+        verifyNoInteractions(containers);
+    }
 
     @ParameterizedTest @ValueSource(strings = {"page=-1","size=101","statusId=0","sprintId=-1"})
     void invalidIssueSearchQueryIsBadRequest(String query) throws Exception {

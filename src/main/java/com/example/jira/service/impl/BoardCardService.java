@@ -43,6 +43,7 @@ public class BoardCardService {
         Map<Integer,BoardIssue> saved = rankMap(boardId);
         var current = new ArrayList<>(issues.findBoardIssues(board.getProject().getProjectId()));
         current.sort(Comparator.comparing((Issue issue) -> columnPosition(issue,byStatus),Comparator.nullsLast(Integer::compareTo))
+                .thenComparing(issue -> effectiveColumn(issue,byStatus) == null ? null : effectiveColumn(issue,byStatus).getColumnId(),Comparator.nullsLast(Integer::compareTo))
                 .thenComparing(issue -> savedPosition(issue,byStatus,saved),Comparator.nullsLast(Integer::compareTo))
                 .thenComparingInt(Issue::getIssueNumber).thenComparingInt(Issue::getIssueId));
         Map<Integer,Integer> positions = new HashMap<>(); List<BoardCardResponse> response = new ArrayList<>();

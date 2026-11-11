@@ -1,0 +1,12 @@
+# Plan sửa/xóa sprint, board và column
+
+Agent chính tự kiểm tra và triển khai theo quyền đã giao, không dùng sub-agent.
+
+1. PATCH `/api/sprints/{sprintId}` nhận tên/goal/ngày tùy chọn. Lấy sprint → project sở hữu → MANAGE_SPRINT; thiếu ID 404, thiếu quyền 403. Khóa project rồi refresh sprint. CLOSED trả 409; ACTIVE chỉ sửa tên/goal, không đổi ngày lịch sử. FUTURE kiểm cặp ngày sau khi ghép với giá trị cũ, sai 400. Chỉ ghi trường request khác null; không đổi state hoặc backlog.
+2. DELETE `/api/sprints/{sprintId}` chỉ cho FUTURE dưới cùng quyền/khóa. ACTIVE/CLOSED trả 409, không xóa lịch sử. Đọc sprint_issues, kiểm mọi issue cùng project (sai 409 trước ghi), reset issues.backlog_position cho các việc trả lại product backlog, xóa liên kết rồi sprints trong một transaction. Không xóa issues hay link CLOSED khác. Lỗi rollback toàn bộ.
+3. PATCH `/api/boards/{boardId}` sửa tên, không đổi project/type/mapping; cần MANAGE_BOARD, khóa project và refresh board rồi ghi boards.board_name. Tên rỗng/quá 100 ký tự trả 400.
+4. DELETE board dưới MANAGE_BOARD và khóa project: xóa board_issues của đúng board, board_column_statuses của các cột thuộc board, board_columns rồi boards. Giữ projects/issues/issue_statuses/sprint. Transaction lỗi rollback; không gọi API xóa issue và không gọi dịch vụ ngoài.
+5. PATCH `/api/boards/columns/{columnId}` sửa tên/WIP tùy chọn. Lấy cột → board → project, kiểm MANAGE_BOARD, khóa/refresh rồi xét WIP mới. WIP âm trả 400, 0 là không giới hạn; số issue hiện tại theo mapping lớn hơn WIP dương mới thì 409, không sửa tên/rank trước. Đếm dữ liệu thật qua query WIP đã có, không chỉ board_issues. Tên nếu gửi không được blank/quá 100.
+6. DELETE column chỉ khi không còn issue được map vào cột; có thì 409 để người dùng chuyển issue trước. Sau cùng quyền/khóa, xóa rank cũ tham chiếu cột (status đã đi nơi khác), mapping rồi cột. Không xóa status hay issue. Board có thể tạm rỗng để thêm cột mới.
+7. DTO/controller gọi service mới để giữ API cũ tương thích. Các thao tác dùng cùng khóa project với move/mapping/backlog nên không sửa WIP hoặc xóa cột giữa lúc move kiểm và ghi. Chưa thêm revision cho tên/goal; hai request sửa tên hợp lệ theo thứ tự commit. Không tự retry mutation.
+8. Unit/HTTP kiểm quyền, ID, CLOSED/ACTIVE/FUTURE, ngày và WIP/body; PostgreSQL kiểm trả backlog, giữ lịch sử, metadata cleanup đúng board/cột, chặn WIP dưới số hiện tại và rollback. Không có FE trong checkout, không nhận là đã kiểm E2E hoặc mọi interleaving.

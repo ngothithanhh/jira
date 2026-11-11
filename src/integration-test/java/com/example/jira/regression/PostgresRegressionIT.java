@@ -86,7 +86,7 @@ class PostgresRegressionIT {
     @EnableJpaRepositories("com.example.jira.repository")
     @Import({BoardServiceImpl.class, SprintServiceImpl.class, IssueServiceImpl.class, RefreshTokenServiceImpl.class,
             AuthServiceImpl.class, BacklogService.class, BoardCardService.class, BoardWipPolicy.class,
-            IssueQueryService.class, AuditLogServiceImpl.class, DatabaseSeeder.class})
+            IssueQueryService.class, AuditLogServiceImpl.class, ContainerManagementService.class, DatabaseSeeder.class})
     static class Config {
         // Cleanup container chạy khi context đóng; local cluster do script dừng sau khi Maven kết thúc.
         @Bean org.springframework.beans.factory.DisposableBean postgresCleanup() {
@@ -126,6 +126,7 @@ class PostgresRegressionIT {
     @Autowired BoardColumnStatusRepository boardMappings;
     @Autowired IssueQueryService issueQueryService;
     @Autowired AuditLogServiceImpl auditService;
+    @Autowired ContainerManagementService containers;
     @Autowired DatabaseSeeder seeder;
     User caller;
     Project project;
@@ -509,6 +510,62 @@ class PostgresRegressionIT {
         var first = issueService.createIssue(request); assertThat(first.getIssueKey()).isEqualTo("P0-8");
         issueQueryService.delete(first.getIssueId(),first.getVersion()); jdbc.execute(sql);
         assertThat(issueService.createIssue(request).getIssueKey()).isEqualTo("P0-9");
+    }
+    // Xóa nháp trả việc về backlog nhưng giữ liên kết CLOSED; cập nhật ngày/tên trước đó cũng phải commit đúng.
+    @Test void deletingFutureSprintReturnsIssuesAndKeepsClosedHistory() {
+        var issue = persistedIssue(); issue.setBacklogPosition(7); issues.saveAndFlush(issue);
+        var future = persistedSprint(SprintState.FUTURE); var closed = persistedSprint(SprintState.CLOSED); saveLink(future,issue); saveLink(closed,issue);
+        var update = new com.example.jira.dto.sprint.UpdateSprintRequest(); update.setSprintName("Draft"); update.setStartDate(java.time.LocalDateTime.of(2026,1,1,0,0)); update.setEndDate(java.time.LocalDateTime.of(2026,1,14,0,0));
+        containers.updateSprint(future.getSprintId(),update);
+        assertThat(sprints.findById(future.getSprintId()).orElseThrow().getSprintName()).isEqualTo("Draft");
+        containers.deleteSprint(future.getSprintId());
+        assertThat(sprints.findById(future.getSprintId())).isEmpty(); assertThat(sprints.findById(closed.getSprintId())).isPresent();
+        assertThat(backlog.findBySprint_SprintId(closed.getSprintId())).hasSize(1);
+        assertThat(issues.findById(issue.getIssueId()).orElseThrow().getBacklogPosition()).isNull();
+        assertThat(backlogService.product(project.getProjectId())).extracting(com.example.jira.dto.issue.IssueResponse::getIssueId).containsExactly(issue.getIssueId());
+        assertThatThrownBy(() -> containers.deleteSprint(closed.getSprintId())).isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException.class,e -> assertThat(e.getStatusCode().value()).isEqualTo(409));
+    }
+    // Đúng thứ tự FK và đúng board: xóa board A không xóa card/cấu hình B hoặc issue chung.
+    @Test void deletingBoardKeepsOtherBoardAndProjectData() {
+        var fixture = moveFixture(0); var other = persistedBoard("Other"); var otherColumn = persistedColumn(other,"Other",0);
+        addBoardRank(fixture.board(),fixture.target(),fixture.issue()); addBoardRank(other,otherColumn,fixture.issue());
+        var mapping = new BoardColumnStatus(); mapping.setId(new BoardColumnStatusId(otherColumn.getColumnId(),fixture.to().getStatusId())); mapping.setBoardColumn(otherColumn); mapping.setIssueStatus(fixture.to()); boardMappings.saveAndFlush(mapping);
+        var update = new com.example.jira.dto.board.UpdateBoardRequest(); update.setBoardName("Renamed"); containers.updateBoard(fixture.board().getBoardId(),update);
+        assertThat(boards.findById(fixture.board().getBoardId()).orElseThrow().getBoardName()).isEqualTo("Renamed");
+        containers.deleteBoard(fixture.board().getBoardId());
+        assertThat(boards.findById(fixture.board().getBoardId())).isEmpty(); assertThat(boards.findById(other.getBoardId())).isPresent();
+        assertThat(boardRanks.findBoardRanks(other.getBoardId())).hasSize(1); assertThat(boardMappings.findBoardMappings(other.getBoardId())).hasSize(1);
+        assertThat(issues.findById(fixture.issue().getIssueId())).isPresent(); assertThat(statuses.findById(fixture.to().getStatusId())).isPresent();
+    }
+    // Lỗi sau khi xóa metadata và gọi repository.delete vẫn khôi phục board/rank/mapping/cột.
+    @Test void failedBoardDeleteRollsBackAllMetadata() {
+        var fixture = moveFixture(0); addBoardRank(fixture.board(),fixture.target(),fixture.issue());
+        var factory = new ProxyFactory(); factory.setInterfaces(BoardRepository.class); factory.setTarget(boards);
+        factory.addAdvice((MethodInterceptor) invocation -> { Object result = invocation.proceed(); if (invocation.getMethod().getName().equals("delete")) throw new IllegalStateException("delete failed"); return result; });
+        Object target = AopTestUtils.getUltimateTargetObject(containers); ReflectionTestUtils.setField(target,"boards",factory.getProxy());
+        try {
+            assertThatThrownBy(() -> containers.deleteBoard(fixture.board().getBoardId())).hasMessageContaining("delete failed");
+            assertThat(boards.findById(fixture.board().getBoardId())).isPresent(); assertThat(columns.findById(fixture.target().getColumnId())).isPresent();
+            assertThat(boardRanks.findBoardRanks(fixture.board().getBoardId())).hasSize(1); assertThat(boardMappings.findBoardMappings(fixture.board().getBoardId())).hasSize(1);
+        } finally { ReflectionTestUtils.setField(target,"boards",boards); }
+    }
+    // WIP dựa trên issue thật, không cần có rank; chuyển hết issue rồi mới xóa được cột và rank cũ.
+    @Test void columnManagementChecksWipAndRequiresEmptyColumn() {
+        var fixture = moveFixture(0); var issue = issues.findById(fixture.issue().getIssueId()).orElseThrow(); issue.setStatus(fixture.to()); issues.saveAndFlush(issue);
+        var other = additionalIssue(2); other.setStatus(fixture.to()); issues.saveAndFlush(other);
+        var update = new com.example.jira.dto.board.UpdateColumnRequest(); update.setColumnName("Renamed"); update.setWipLimit(1);
+        assertThatThrownBy(() -> containers.updateColumn(fixture.target().getColumnId(),update)).isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException.class,e -> assertThat(e.getStatusCode().value()).isEqualTo(409));
+        assertThat(columns.findById(fixture.target().getColumnId()).orElseThrow().getColumnName()).isEqualTo("Doing");
+        update.setWipLimit(2); containers.updateColumn(fixture.target().getColumnId(),update);
+        assertThat(columns.findById(fixture.target().getColumnId()).orElseThrow().getWipLimit()).isEqualTo(2);
+        assertThatThrownBy(() -> containers.deleteColumn(fixture.target().getColumnId())).isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException.class,e -> assertThat(e.getStatusCode().value()).isEqualTo(409));
+        addBoardRank(fixture.board(),fixture.target(),fixture.issue());
+        jdbc.update("update issues set status_id=null where project_id=?",project.getProjectId());
+        containers.deleteColumn(fixture.target().getColumnId());
+        assertThat(columns.findById(fixture.target().getColumnId())).isEmpty(); assertThat(boardRanks.count()).isZero(); assertThat(boardMappings.count()).isZero(); assertThat(issues.count()).isEqualTo(2);
+    }
+    private void addBoardRank(Board board,BoardColumn column,Issue issue) {
+        var rank = new BoardIssue(); rank.setId(new BoardIssueId(board.getBoardId(),issue.getIssueId())); rank.setBoard(board); rank.setColumn(column); rank.setIssue(issue); boardRanks.saveAndFlush(rank);
     }
     // Các helper chỉ tạo fixture đã commit trong DB test; không thay thuật toán production.
     private Sprint persistedSprint(SprintState state) {
