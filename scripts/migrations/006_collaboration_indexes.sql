@@ -1,0 +1,10 @@
+BEGIN;
+ALTER TABLE issue_comments ALTER COLUMN comment_text TYPE text;
+ALTER TABLE issue_comments ADD COLUMN IF NOT EXISTS version bigint;
+UPDATE issue_comments SET version=0 WHERE version IS NULL;
+ALTER TABLE issue_comments ALTER COLUMN version SET DEFAULT 0;
+ALTER TABLE issue_comments ALTER COLUMN version SET NOT NULL;
+ALTER TABLE issue_comments ADD COLUMN IF NOT EXISTS updated_at timestamp;
+CREATE INDEX IF NOT EXISTS ix_audit_order ON audit_logs(created_at DESC,audit_id DESC);
+CREATE INDEX IF NOT EXISTS ix_notification_inbox ON notifications(user_id,read);
+COMMIT;

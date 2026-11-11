@@ -60,13 +60,13 @@ class IssueQueryRegressionTest {
         var pageable = ArgumentCaptor.forClass(Pageable.class); verify(issues).findAll(any(Specification.class),pageable.capture());
         assertThat(pageable.getValue().getSort()).isEqualTo(Sort.by("summary","issueId"));
     }
-    @ParameterizedTest @ValueSource(strings = {"page","size","sort","direction","keyword","assignee","id"})
+    @ParameterizedTest @ValueSource(strings = {"page","size","sort","direction","keyword","assignee","id","offset"})
     void invalidSearchIsBadRequest(String kind) {
         var request = new IssueSearchRequest();
         switch (kind) {
             case "page" -> request.setPage(-1); case "size" -> request.setSize(101); case "sort" -> request.setSort("passwordHash");
             case "direction" -> request.setDirection("sideways"); case "keyword" -> request.setKeyword("x".repeat(201));
-            case "assignee" -> { request.setUnassigned(true); request.setAssigneeId(2); } default -> request.setTypeId(0);
+            case "assignee" -> { request.setUnassigned(true); request.setAssigneeId(2); } case "offset" -> request.setPage(Integer.MAX_VALUE); default -> request.setTypeId(0);
         }
         fails(() -> service.search(10,request),HttpStatus.BAD_REQUEST); verifyNoInteractions(projects);
     }

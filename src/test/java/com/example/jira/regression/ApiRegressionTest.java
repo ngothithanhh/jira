@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.*;
         IssueCommentController.class, IssueAttachmentController.class, IssueTypeController.class,
         IssueStatusController.class, UserRoleController.class, PermissionController.class,
         RolePermissionController.class, WorkflowController.class, BoardController.class,
-        SprintController.class, NotificationController.class, BacklogController.class, BoardCardController.class, IssueQueryController.class, ContainerManagementController.class, ScrumReportController.class, AccountManagementController.class}, properties = {
+        SprintController.class, NotificationController.class, BacklogController.class, BoardCardController.class, IssueQueryController.class, ContainerManagementController.class, ScrumReportController.class, AccountManagementController.class, NotificationInboxController.class, AdminQueryController.class}, properties = {
         "app.jwt.secret=" + SecurityRegressionTest.SECRET, "app.jwt.expiration=60000"})
 @Import({SecurityConfig.class, JwtUtil.class, CorsConfig.class})
 class ApiRegressionTest {
@@ -64,6 +64,26 @@ class ApiRegressionTest {
     @MockBean com.example.jira.service.impl.ContainerManagementService containers;
     @MockBean com.example.jira.service.impl.ScrumReportService reports;
     @MockBean com.example.jira.service.impl.AccountManagementService accounts;
+    @MockBean com.example.jira.service.impl.NotificationInboxService inbox;
+    @MockBean com.example.jira.service.impl.AdminQueryService adminQueries;
+
+    @Test void collaborationAndAdminRoutesPreserveOwnershipScopeAndVersion() throws Exception {
+        mvc.perform(put("/api/issues/5/comments/7").header("Authorization",bearer()).contentType(MediaType.APPLICATION_JSON).content("{\"commentText\":\"Changed\",\"expectedVersion\":3}")).andExpect(status().isOk());
+        mvc.perform(delete("/api/issues/5/comments/7?expectedVersion=3").header("Authorization",bearer())).andExpect(status().isNoContent());
+        mvc.perform(get("/api/notifications/unread-count").header("Authorization",bearer())).andExpect(status().isOk()).andExpect(jsonPath("$.count").value(0));
+        mvc.perform(put("/api/notifications/read-all").header("Authorization",bearer())).andExpect(status().isOk()).andExpect(jsonPath("$.updated").value(0));
+        mvc.perform(delete("/api/notifications/7").header("Authorization",bearer())).andExpect(status().isNoContent());
+        mvc.perform(get("/api/admin/audit-logs?entityType=ISSUE&entityId=5&actorId=2&page=1").header("Authorization",bearer())).andExpect(status().isOk());
+        mvc.perform(get("/api/admin/overview").header("Authorization",bearer())).andExpect(status().isOk());
+        verify(comments).updateComment(eq(5),eq(7),argThat(body -> body.expectedVersion()==3L)); verify(comments).deleteComment(5,7,3L);
+        verify(inbox).unreadCount(); verify(inbox).readAll(); verify(inbox).delete(7);
+        verify(adminQueries).audit(argThat(request -> request.getEntityId()==5 && request.getActorId()==2 && request.getPage()==1)); verify(adminQueries).overview();
+    }
+    @Test void commentVersionAndAuditQueryValidationRejectInvalidBody() throws Exception {
+        mvc.perform(put("/api/issues/5/comments/7").header("Authorization",bearer()).contentType(MediaType.APPLICATION_JSON).content("{\"commentText\":\"Changed\"}")).andExpect(status().isBadRequest());
+        mvc.perform(get("/api/admin/audit-logs?actorId=-1").header("Authorization",bearer())).andExpect(status().isBadRequest());
+        verifyNoInteractions(comments,adminQueries);
+    }
 
     @Test void oldJwtVersionIsRejectedAndNewVersionIsAccepted() throws Exception {
         var user=Fixtures.user(1); user.setAuthVersion(1);

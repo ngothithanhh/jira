@@ -21,8 +21,10 @@ Người dùng đã duyệt plan sửa bug và cho phép tiếp tục tự độ
 | 4 | Chi tiết/xóa issue, tìm kiếm, lọc, phân trang | 303 unit/HTTP + 26 PostgreSQL đạt; đã tự kiểm tra | a985353 |
 | 5 | Sửa/xóa sprint, board, column | 319 unit/HTTP + 30 PostgreSQL đạt; đã tự kiểm tra | f777900 |
 | 6 | Tổng kết sprint, velocity, burndown | 334 unit/HTTP + 33 PostgreSQL đạt; đã tự kiểm tra | acfe3fe |
-| 7 | Quản lý người dùng/tài khoản, vai trò thành viên | Clean verify: 354 unit/HTTP + 43 PostgreSQL đạt; đã tự kiểm tra | Xem git log |
-| 8 | Sửa/xóa comment, notification, tra cứu audit | Chờ plan chi tiết | Chưa commit |
+| 7 | Quản lý người dùng/tài khoản, vai trò thành viên | Clean verify: 354 unit/HTTP + 43 PostgreSQL đạt; đã tự kiểm tra | 26c2716 |
+| 8 | Sửa/xóa comment, notification, tra cứu audit | 371 unit/HTTP + 49 PostgreSQL đạt; đã tự kiểm tra | Xem git log |
+
+Kiểm tra full app/HTTP thật và Swagger tiếp tục theo FINAL_VERIFICATION_PLAN.md trước khi chốt báo cáo tính năng cuối.
 
 ## Điều kiện ghi nhận hoàn tất
 

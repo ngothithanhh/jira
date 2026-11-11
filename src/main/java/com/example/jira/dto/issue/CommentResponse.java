@@ -8,8 +8,10 @@ import java.time.LocalDateTime;
 public class CommentResponse {
     private int commentId;
     private int issueId;
-    private int userId;
+    private Integer userId;
     private String userName;
     private String commentText;
     private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
+    private Long version;
 }

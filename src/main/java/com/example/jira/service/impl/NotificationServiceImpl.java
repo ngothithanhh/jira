@@ -77,11 +77,11 @@ public class NotificationServiceImpl implements NotificationService {
     @Transactional
     public void markAsRead(int notificationId) {
         Notification notification = notificationRepository.findById(notificationId)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy thông báo"));
+                .orElseThrow(() -> new com.example.jira.exception.NotFoundException("Không tìm thấy thông báo"));
         
         int userId = SecurityUtils.getCurrentUserId();
-        if (notification.getUser().getUserId() != userId) {
-            throw new RuntimeException("Không có quyền thao tác trên thông báo này");
+        if (notification.getUser()==null || notification.getUser().getUserId() != userId) {
+            throw new org.springframework.security.access.AccessDeniedException("Không có quyền thao tác trên thông báo này");
         }
         
         notification.setRead(true);

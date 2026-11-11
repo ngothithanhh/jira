@@ -25,6 +25,10 @@ class CollaborationRegressionTest {
 
     @Nested @ExtendWith(MockitoExtension.class)
     class Comments {
+        @Mock ProjectRepository projects;
+        @Mock jakarta.persistence.EntityManager entityManager;
+        @Mock AuditLogService audit;
+        @BeforeEach void projectLock() { lenient().when(projects.findByIdForUpdate(10)).thenReturn(Optional.of(Fixtures.project(10))); }
         @Mock IssueCommentRepository comments;
         @Mock IssueRepository issues;
         @Mock UserRepository users;

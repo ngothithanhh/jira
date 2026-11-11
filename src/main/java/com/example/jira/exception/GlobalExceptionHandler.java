@@ -11,6 +11,11 @@ import org.springframework.web.server.ResponseStatusException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    /** Entity bị xóa lúc request chờ khóa/refresh: trả 404 thay vì tạo lại dữ liệu hoặc lộ lỗi Hibernate. */
+    @ExceptionHandler(jakarta.persistence.EntityNotFoundException.class)
+    public ResponseEntity<ApiError> disappeared(jakarta.persistence.EntityNotFoundException exception) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiError.of(HttpStatus.NOT_FOUND,"Tài nguyên không còn tồn tại"));
+    }
     /** Hai lượt cùng ghi version cũ: trả 409 để client tải lại thay vì tự ghi đè dữ liệu mới. */
     @ExceptionHandler({org.springframework.dao.OptimisticLockingFailureException.class, jakarta.persistence.OptimisticLockException.class})
     public ResponseEntity<ApiError> optimisticConflict(Exception exception) {

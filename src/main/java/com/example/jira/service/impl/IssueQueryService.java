@@ -115,7 +115,7 @@ public class IssueQueryService {
 
     /** Chặn query sai trước DB, kể cả caller nội bộ không đi qua Bean Validation. */
     private void validate(IssueSearchRequest request) {
-        if (request == null || request.getPage() < 0 || request.getSize() < 1 || request.getSize() > 100
+        if (request == null || request.getPage() < 0 || request.getSize() < 1 || request.getSize() > 100 || (long)request.getPage()*request.getSize()>Integer.MAX_VALUE
                 || request.getSort() == null || !SORTS.contains(request.getSort()) || request.getDirection() == null
                 || !Set.of("ASC","DESC").contains(request.getDirection().toUpperCase(Locale.ROOT))
                 || (request.getKeyword() != null && request.getKeyword().length() > 200)

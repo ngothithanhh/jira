@@ -8,6 +8,10 @@ import java.util.List;
 
 @Repository
 public interface NotificationRepository extends JpaRepository<Notification, Integer> {
+    long countByUser_UserIdAndReadFalse(int userId);
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.data.jpa.repository.Query("update Notification n set n.read=true where n.user.userId=:userId and n.read=false")
+    int markAllRead(@org.springframework.data.repository.query.Param("userId") int userId);
     List<Notification> findByUser_UserIdOrderByCreatedAtDesc(int userId);
     List<Notification> findByUser_UserIdAndReadFalse(int userId);
 }

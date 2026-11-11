@@ -9,6 +9,7 @@ import java.util.List;
 
 @Repository
 public interface SprintRepository extends JpaRepository<Sprint, Integer> {
+    long countByState(SprintState state);
     List<Sprint> findByProject_ProjectIdAndState(int projectId, SprintState state);
 
     // Có snapshot thì dùng thời điểm đóng thật; legacy thiếu snapshot xếp sau và fallback theo ID.

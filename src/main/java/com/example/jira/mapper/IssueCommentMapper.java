@@ -16,6 +16,7 @@ public class IssueCommentMapper {
         }
         res.setCommentText(comment.getCommentText());
         res.setCreatedAt(comment.getCreatedAt());
+        res.setUpdatedAt(comment.getUpdatedAt()); res.setVersion(comment.getVersion());
         return res;
     }
 }

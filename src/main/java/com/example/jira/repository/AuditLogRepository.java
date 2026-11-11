@@ -8,6 +8,6 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 
 @Repository
-public interface AuditLogRepository extends JpaRepository<AuditLog, Integer> {
+public interface AuditLogRepository extends JpaRepository<AuditLog, Integer>, org.springframework.data.jpa.repository.JpaSpecificationExecutor<AuditLog> {
     List<AuditLog> findByEntityTypeAndEntityIdOrderByCreatedAtDesc(EntityType entityType, int entityId);
 }

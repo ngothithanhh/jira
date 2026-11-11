@@ -28,9 +28,13 @@ public class IssueComment {
     @JoinColumn(name = "user_id")
     private User user;
 
-    @Column(name = "comment_text")
+    @Column(name = "comment_text",columnDefinition="TEXT")
     private String commentText;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;
+    @Column(name="updated_at")
+    private LocalDateTime updatedAt;
+    @Version @Column(nullable=false)
+    private Long version;
 }

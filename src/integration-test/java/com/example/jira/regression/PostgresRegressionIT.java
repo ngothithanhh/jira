@@ -89,7 +89,8 @@ class PostgresRegressionIT {
             IssueQueryService.class, AuditLogServiceImpl.class, ContainerManagementService.class,
             SprintMetricsService.class, ScrumReportService.class, AccountManagementService.class,
             ProjectMemberServiceImpl.class, UserRoleServiceImpl.class, com.example.jira.security.GlobalSecurity.class,
-            com.example.jira.security.CustomUserDetailsService.class, DatabaseSeeder.class})
+            com.example.jira.security.CustomUserDetailsService.class, IssueCommentServiceImpl.class,
+            NotificationInboxService.class, AdminQueryService.class, DatabaseSeeder.class})
     static class Config {
         // Cleanup container chạy khi context đóng; local cluster do script dừng sau khi Maven kết thúc.
         @Bean org.springframework.beans.factory.DisposableBean postgresCleanup() {
@@ -147,6 +148,11 @@ class PostgresRegressionIT {
     @Autowired ProjectMemberRepository members;
     @Autowired PasswordEncoder encoder;
     @Autowired JwtUtil jwt;
+    @Autowired IssueCommentServiceImpl commentService;
+    @Autowired IssueCommentRepository commentRows;
+    @Autowired NotificationInboxService inbox;
+    @Autowired NotificationRepository notificationRows;
+    @Autowired AdminQueryService adminQueries;
     @Autowired DatabaseSeeder seeder;
     User caller;
     Project project;
@@ -750,6 +756,96 @@ class PostgresRegressionIT {
         assertThat(roleAssignments.countEnabledAdmins()).isEqualTo(1);
         assertThatThrownBy(() -> accounts.enabled(caller.getUserId(),false)).isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException.class,e -> assertThat(e.getStatusCode().value()).isEqualTo(409));
         assertThat(users.findById(caller.getUserId()).orElseThrow().isEnabled()).isTrue();
+    }
+    // Hai sửa cùng version chỉ một thành công; version trả ra đúng DB, stale delete không được xóa bản mới.
+    @Test void concurrentCommentEditsUseVersionAndKeepAudit() throws Exception {
+        var issue=persistedIssue(); when(security.hasPermission(project.getProjectId(),PermissionName.VIEW_PROJECT)).thenReturn(true);
+        var body=new com.example.jira.dto.issue.CreateCommentRequest(); body.setCommentText("Original");
+        var created=commentService.addComment(issue.getIssueId(),body); int callerId=caller.getUserId();
+        var results=race(() -> { Fixtures.login(callerId);
+            try { return outcome(() -> commentService.updateComment(issue.getIssueId(),created.getCommentId(),new com.example.jira.dto.issue.UpdateCommentRequest("Edited",created.getVersion()))); }
+            finally { org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
+        });
+        assertOneSuccessAndConflict(results); var current=commentRows.findById(created.getCommentId()).orElseThrow(); assertThat(current.getVersion()).isEqualTo(1); assertThat(current.getCommentText()).isEqualTo("Edited");
+        assertThatThrownBy(() -> commentService.deleteComment(issue.getIssueId(),created.getCommentId(),0L)).isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException.class,e -> assertThat(e.getStatusCode().value()).isEqualTo(409));
+        commentService.deleteComment(issue.getIssueId(),created.getCommentId(),1L);
+        assertThat(commentRows.count()).isZero(); assertThat(jdbc.queryForObject("select count(*) from audit_logs where entity_type='COMMENT'",Integer.class)).isEqualTo(3);
+    }
+    // Comment/audit đã flush vẫn rollback cả hai khi bước ghi audit thất bại.
+    @Test void failedCommentAuditRollsBackTextAndVersion() {
+        var issue=persistedIssue(); when(security.hasPermission(project.getProjectId(),PermissionName.VIEW_PROJECT)).thenReturn(true);
+        var body=new com.example.jira.dto.issue.CreateCommentRequest(); body.setCommentText("Original"); var created=commentService.addComment(issue.getIssueId(),body);
+        var factory=new ProxyFactory(); factory.setInterfaces(com.example.jira.service.AuditLogService.class); factory.setTarget(auditService);
+        factory.addAdvice((MethodInterceptor) invocation -> { invocation.proceed(); em.flush(); throw new IllegalStateException("comment audit failed"); });
+        Object target=AopTestUtils.getUltimateTargetObject(commentService); ReflectionTestUtils.setField(target,"audit",factory.getProxy());
+        try {
+            assertThatThrownBy(() -> commentService.updateComment(issue.getIssueId(),created.getCommentId(),new com.example.jira.dto.issue.UpdateCommentRequest("Changed",0L))).hasMessageContaining("comment audit failed");
+            var current=commentRows.findById(created.getCommentId()).orElseThrow(); assertThat(current.getCommentText()).isEqualTo("Original"); assertThat(current.getVersion()).isZero();
+            assertThat(jdbc.queryForObject("select count(*) from audit_logs where action='UPDATE_COMMENT'",Integer.class)).isZero();
+        } finally { ReflectionTestUtils.setField(target,"audit",auditService); }
+    }
+    // Add giữ khóa project trước insert; delete phải chờ rồi dọn cả comment vừa commit, không có row mồ côi.
+    @Test void issueDeletionWaitsForConcurrentCommentCreation() throws Exception {
+        var issue=persistedIssue(); when(security.hasPermission(project.getProjectId(),PermissionName.VIEW_PROJECT)).thenReturn(true);
+        var held=new CountDownLatch(1); var release=new CountDownLatch(1); var deleteAttempt=new CountDownLatch(1);
+        var reader=new ProxyFactory(); reader.setInterfaces(ProjectRepository.class); reader.setTarget(projects);
+        reader.addAdvice((MethodInterceptor) invocation -> { Object result=invocation.proceed(); if (invocation.getMethod().getName().equals("findByIdForUpdate")) { held.countDown(); if (!release.await(10,TimeUnit.SECONDS)) throw new IllegalStateException("comment lock timeout"); } return result; });
+        var writer=new ProxyFactory(); writer.setInterfaces(ProjectRepository.class); writer.setTarget(projects);
+        writer.addAdvice((MethodInterceptor) invocation -> { if (invocation.getMethod().getName().equals("findByIdForUpdate")) deleteAttempt.countDown(); return invocation.proceed(); });
+        Object commentTarget=AopTestUtils.getUltimateTargetObject(commentService),deleteTarget=AopTestUtils.getUltimateTargetObject(issueQueryService);
+        ReflectionTestUtils.setField(commentTarget,"projects",reader.getProxy()); ReflectionTestUtils.setField(deleteTarget,"projects",writer.getProxy());
+        var pool=Executors.newFixedThreadPool(2); int userId=caller.getUserId();
+        try {
+            var add=pool.submit(() -> { Fixtures.login(userId); try { var request=new com.example.jira.dto.issue.CreateCommentRequest(); request.setCommentText("Concurrent"); return commentService.addComment(issue.getIssueId(),request); } finally { org.springframework.security.core.context.SecurityContextHolder.clearContext(); } });
+            assertThat(held.await(10,TimeUnit.SECONDS)).isTrue();
+            var delete=pool.submit(() -> { Fixtures.login(userId); try { issueQueryService.delete(issue.getIssueId(),issue.getVersion()); } finally { org.springframework.security.core.context.SecurityContextHolder.clearContext(); } });
+            assertThat(deleteAttempt.await(10,TimeUnit.SECONDS)).isTrue(); assertThatThrownBy(() -> delete.get(200,TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
+            release.countDown(); assertThat(add.get(10,TimeUnit.SECONDS).getCommentId()).isPositive(); delete.get(10,TimeUnit.SECONDS);
+            assertThat(issues.count()).isZero(); assertThat(commentRows.count()).isZero();
+        } finally {
+            release.countDown(); pool.shutdownNow(); pool.awaitTermination(10,TimeUnit.SECONDS);
+            ReflectionTestUtils.setField(commentTarget,"projects",projects); ReflectionTestUtils.setField(deleteTarget,"projects",projects);
+        }
+    }
+    // Bulk read chỉ tác động inbox hiện tại; gọi lại là no-op và không xóa thông báo người khác.
+    @Test void inboxBulkReadAndDeleteRespectRecipient() {
+        var other=Fixtures.user(0); other.setEmail("inbox-other@test.invalid"); other=users.saveAndFlush(other);
+        var mine=new Notification(); mine.setUser(caller); mine=notificationRows.saveAndFlush(mine);
+        var second=new Notification(); second.setUser(caller); notificationRows.saveAndFlush(second);
+        var foreign=new Notification(); foreign.setUser(other); foreign=notificationRows.saveAndFlush(foreign);
+        assertThat(inbox.unreadCount()).isEqualTo(2); assertThat(inbox.readAll()).isEqualTo(2); assertThat(inbox.readAll()).isZero(); assertThat(inbox.unreadCount()).isZero();
+        assertThat(notificationRows.countByUser_UserIdAndReadFalse(other.getUserId())).isEqualTo(1);
+        int foreignId=foreign.getNotificationId(); assertThatThrownBy(() -> inbox.delete(foreignId)).isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException.class,e -> assertThat(e.getStatusCode().value()).isEqualTo(403));
+        inbox.delete(mine.getNotificationId()); assertThat(notificationRows.findById(foreignId)).isPresent(); assertThat(users.count()).isEqualTo(2);
+    }
+    // SQL audit giữ actor null, count/page cùng filter; overview đếm dữ liệu thật và admin gate chặn user thường.
+    @Test void auditSearchAndOverviewAreScopedToAdministrators() {
+        makeAdmin(caller);
+        tx(() -> {
+            for (int day=1; day<=3; day++) {
+                var log=new AuditLog(); log.setAction("CREATE"); log.setEntityType(day==3?EntityType.ISSUE:EntityType.PROJECT); log.setEntityId(project.getProjectId());
+                log.setUser(day==2?null:caller); log.setCreatedAt(java.time.LocalDateTime.of(2026,1,day,0,0)); log.setDescription("Test"); em.persist(log);
+            } return null;
+        });
+        var request=new com.example.jira.dto.audit.AuditSearchRequest(); request.setEntityType(EntityType.PROJECT); request.setEntityId(project.getProjectId()); request.setAction("create");
+        request.setCreatedFrom(java.time.LocalDateTime.of(2026,1,1,0,0)); request.setCreatedTo(java.time.LocalDateTime.of(2026,1,4,0,0)); request.setSize(1);
+        var page=adminQueries.audit(request); assertThat(page.totalItems()).isEqualTo(2); assertThat(page.totalPages()).isEqualTo(2); assertThat(page.items()).singleElement().satisfies(log -> assertThat(log.actorId()).isNull());
+        request.setActorId(caller.getUserId()); assertThat(adminQueries.audit(request).totalItems()).isEqualTo(1);
+        persistedSprint(SprintState.ACTIVE); persistedSprint(SprintState.CLOSED); var overview=adminQueries.overview();
+        assertThat(overview.users()).isEqualTo(1); assertThat(overview.enabledAdmins()).isEqualTo(1); assertThat(overview.projects()).isEqualTo(1); assertThat(overview.activeSprints()).isEqualTo(1); assertThat(overview.closedSprints()).isEqualTo(1);
+        var other=Fixtures.user(0); other.setEmail("audit-denied@test.invalid"); other=users.saveAndFlush(other); Fixtures.login(other.getUserId());
+        assertThatThrownBy(adminQueries::overview).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        assertThatThrownBy(() -> adminQueries.audit(new com.example.jira.dto.audit.AuditSearchRequest())).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+    }
+    // Mô phỏng dữ liệu cũ có version null/varchar ngắn rồi kiểm backfill và lưu text dài hơn 255 ký tự.
+    @Test void collaborationMigrationBackfillsVersionAndWidensCommentText() throws Exception {
+        var issue=persistedIssue(); jdbc.execute("alter table issue_comments alter column version drop not null"); jdbc.execute("alter table issue_comments alter column comment_text type varchar(255)");
+        jdbc.update("insert into issue_comments(issue_id,comment_text,version) values (?,?,null)",issue.getIssueId(),"Legacy");
+        String sql=java.nio.file.Files.readString(java.nio.file.Path.of("scripts/migrations/006_collaboration_indexes.sql")); jdbc.execute(sql); jdbc.execute(sql);
+        assertThat(jdbc.queryForObject("select version from issue_comments limit 1",Long.class)).isZero();
+        when(security.hasPermission(project.getProjectId(),PermissionName.VIEW_PROJECT)).thenReturn(true);
+        var body=new com.example.jira.dto.issue.CreateCommentRequest(); body.setCommentText("x".repeat(600)); var created=commentService.addComment(issue.getIssueId(),body);
+        assertThat(created.getCommentText()).hasSize(600); assertThat(commentService.getCommentsByIssue(issue.getIssueId())).anySatisfy(value -> { assertThat(value.getCommentText()).isEqualTo("Legacy"); assertThat(value.getUserId()).isNull(); });
     }
     private UserRole makeAdmin(User user) {
         UserRole role=roleRows.findByRoleName("SYSTEM_ADMIN").orElseGet(() -> roleRows.saveAndFlush(Fixtures.role(0,"SYSTEM_ADMIN")));
