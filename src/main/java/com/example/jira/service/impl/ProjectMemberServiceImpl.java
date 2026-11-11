@@ -14,6 +14,9 @@ import com.example.jira.enums.PermissionName;
 import com.example.jira.service.AuditLogService;
 import com.example.jira.service.NotificationService;
 import com.example.jira.ultils.SecurityUtils;
+import com.example.jira.exception.NotFoundException;
+import com.example.jira.exception.ConflictException;
+import org.springframework.security.access.AccessDeniedException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -32,28 +35,30 @@ public class ProjectMemberServiceImpl implements ProjectMemberService {
     private final AuditLogService auditLogService;
     private final NotificationService notificationService;
 
+    /** projectId là ID projects, request.userId là người được thêm và roleId là ID user_roles. Kiểm ADD_MEMBER trước khi đọc/ghi; lưu project_members rồi audit và thông báo người được thêm. */
     @Override
     public void addMember(int projectId, AddMemberRequest request){
 
+        // Thiếu quyền trên bên sở hữu dữ liệu thì dừng bằng 403, không thực hiện các cập nhật bên dưới.
         if(!projectSecurity.hasPermission(projectId, PermissionName.ADD_MEMBER))
-            throw new RuntimeException("Bạn không có quyền thêm thành viên vào dự án này!");
+            throw new AccessDeniedException("Bạn không có quyền thêm thành viên vào dự án này!");
 
-        Project project = projectRepository.findById(projectId).orElseThrow(()->new RuntimeException("Không tìm thấy dự án!"));
+        Project project = projectRepository.findById(projectId).orElseThrow(()->new NotFoundException("Không tìm thấy dự án!"));
 
-        User user = userRepository.findById(request.getUserId()).orElseThrow(()->new RuntimeException("Không tìm thấy người dùng!"));
+        User user = userRepository.findById(request.getUserId()).orElseThrow(()->new NotFoundException("Không tìm thấy người dùng!"));
 
-        UserRole userRole = userRoleRepositoty.findByRoleId(request.getRoleId()).orElseThrow(()->new RuntimeException("Không tìm thấy vai trò!"));
+        UserRole userRole = userRoleRepositoty.findByRoleId(request.getRoleId()).orElseThrow(()->new NotFoundException("Không tìm thấy vai trò!"));
 
         if(userRole.getRoleName().equals("PROJECT_MANAGER")){
             if(projectMemberRepository.existsByProject_ProjectIdAndRole_RoleName(projectId,"PROJECT_MANAGER")){
-                throw new RuntimeException("Đã có PROJECT MANAGER!");
+                throw new ConflictException("Đã có PROJECT MANAGER!");
             }
         }
 
         ProjectMemberId id = new ProjectMemberId(projectId,user.getUserId());
 
         if(projectMemberRepository.existsById(id)){
-            throw new RuntimeException("Người dùng đã có trong dự án!");
+            throw new ConflictException("Người dùng đã có trong dự án!");
         }
 
         ProjectMember member = new ProjectMember();
@@ -73,18 +78,26 @@ public class ProjectMemberServiceImpl implements ProjectMemberService {
         String message = actorName + " đã thêm bạn vào dự án " + project.getProjectName() + ".";
         notificationService.sendNotification(request.getUserId(), null, actorId, NotificationType.PROJECT_INVITED, message);
     }
+    /** projectId là ID projects trong path. Thiếu VIEW_PROJECT thì 403 trước truy vấn project_members; đủ quyền mới trả danh sách, không ghi DB. */
     @Override
     public List<ProjectMemberResponse> getMembers(int projectId){
+        // projectId là ID projects từ path, không phải ID user; kiểm quyền trước khi đọc project_members.
+        // Thiếu quyền trên bên sở hữu dữ liệu thì dừng bằng 403, không thực hiện các cập nhật bên dưới.
+        if (!projectSecurity.hasPermission(projectId, PermissionName.VIEW_PROJECT)) {
+            throw new AccessDeniedException("Bạn không có quyền xem thành viên của dự án này");
+        }
         List<ProjectMember> members = projectMemberRepository.findByProject_ProjectId(projectId);
 
         return members.stream().map(ProjectMemberMapper::toResponse).toList();
     }
 
+    /** projectId/userId là cặp khóa project_members cần gỡ, khác ID người gọi. Thiếu DELETE_MEMBER thì 403; đủ quyền mới xóa đúng cặp và ghi audit. */
     @Override
     public void removeMember(int projectId, int userId){
 
+        // Thiếu quyền trên bên sở hữu dữ liệu thì dừng bằng 403, không thực hiện các cập nhật bên dưới.
         if(!projectSecurity.hasPermission(projectId, PermissionName.DELETE_MEMBER))
-            throw new RuntimeException("Bạn không có quyền xóa thành viên khỏi dự án này!");
+            throw new AccessDeniedException("Bạn không có quyền xóa thành viên khỏi dự án này!");
 
         ProjectMemberId id = new ProjectMemberId(projectId,userId);
         projectMemberRepository.deleteById(id);

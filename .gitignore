@@ -36,3 +36,5 @@ application.yaml
 *.env
 dotenv.env
 implementation_plan.md
+/.m2/
+/src/main/resources/application.properties

@@ -17,6 +17,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 
@@ -67,17 +69,14 @@ public class AuthServiceImpl implements AuthService {
 
     }
 
+    /** Token từ body được tiêu thụ và rotation trong service có khóa DB; chỉ cấp access token sau commit. */
     @Override
     public AuthResponseDTO refreshToken(String refreshToken){
-        RefreshToken token = refreshTokenService.verifyToken(refreshToken);
-
-        RefreshToken newToken = refreshTokenService.rotateRefreshToken(token);
-
-        String newAccessToken = jwtUtil.generateToken(token.getUser().getEmail());
-
-        return new AuthResponseDTO(newAccessToken, newToken.getTokenValue());
-
-
+        var result = refreshTokenService.consumeAndRotate(refreshToken);
+        // Việc thu hồi family đã commit trước khi trả 401 để client đăng nhập lại.
+        if (result.error() != null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, result.error());
+        RefreshToken next = result.token();
+        return new AuthResponseDTO(jwtUtil.generateToken(next.getUser().getEmail()), next.getTokenValue());
     }
 
     @Override

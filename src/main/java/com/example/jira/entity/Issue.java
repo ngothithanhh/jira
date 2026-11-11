@@ -12,7 +12,12 @@ import java.util.List;
 import java.util.Set;
 
 @Entity
-@Table(name = "issues")
+// DB chặn trùng số trong cùng project và trùng mã issue toàn hệ thống, kể cả bên ghi ngoài service.
+// Dữ liệu cũ phải được preflight riêng trước migration; khai báo này không tự sửa các bản ghi trùng.
+@Table(name = "issues", uniqueConstraints = {
+        @UniqueConstraint(name = "uk_issues_project_number", columnNames = {"project_id", "issue_number"}),
+        @UniqueConstraint(name = "uk_issues_issue_key", columnNames = "issue_key")
+})
 @NoArgsConstructor
 @AllArgsConstructor
 @Getter @Setter

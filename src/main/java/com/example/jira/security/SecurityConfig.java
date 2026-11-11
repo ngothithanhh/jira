@@ -1,10 +1,13 @@
 package com.example.jira.security;
 
 import com.example.jira.security.jwt.JwtAuthenticationFilter;
+import com.example.jira.exception.ApiError;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
@@ -25,11 +28,19 @@ public class SecurityConfig {
 
 
     @Bean
+    /** JWT xác định người gọi mỗi request; thiếu danh tính trả JSON 401, thiếu quyền trả JSON 403. */
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
 
         http
                 .cors(Customizer.withDefaults())
                 .csrf(csrf -> csrf.disable())
+                // API không dùng session để giữ danh tính sau khi JWT bị xóa hoặc hết hạn.
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .exceptionHandling(errors -> errors
+                        .authenticationEntryPoint((request, response, exception) ->
+                                ApiError.write(response, HttpStatus.UNAUTHORIZED, "Chưa xác thực hoặc phiên đăng nhập không hợp lệ"))
+                        .accessDeniedHandler((request, response, exception) ->
+                                ApiError.write(response, HttpStatus.FORBIDDEN, "Bạn không có quyền thực hiện")))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()

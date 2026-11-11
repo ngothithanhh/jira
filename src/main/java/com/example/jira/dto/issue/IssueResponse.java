@@ -25,13 +25,16 @@ public class IssueResponse {
     private int projectId;
     private String projectKey;
 
-    private int reporterId;
+    // ID user có thể vắng trên dữ liệu cũ; giữ null trong JSON, không thay bằng ID 0.
+    private Integer reporterId;
     private String reporterName;
-    private int assigneeId;
+    // Issue chưa giao cho ai thì không có ID user nhận việc.
+    private Integer assigneeId;
     private String assigneeName;
 
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
-    private int parentIssueId;
+    // Issue độc lập không có ID issue cha trong bảng issues.
+    private Integer parentIssueId;
 }

@@ -14,6 +14,11 @@ import java.util.Optional;
 @Repository
 public interface IssueRepository extends JpaRepository<Issue,Integer> {
     
+    /**
+     * Đọc số issue lớn nhất trong project để createIssue cấp số tiếp theo, không ghi DB.
+     * Bên gọi phải khóa bản ghi projects tương ứng trong cùng transaction trước truy vấn này.
+     * Khóa project vẫn bảo vệ được trường hợp chưa có issue; Optional rỗng được service coi là 0.
+     */
     @Query("SELECT MAX(i.issueNumber) FROM Issue i WHERE i.project.projectId = :projectId")
     Optional<Integer> findMaxIssueNumberByProjectId(@Param("projectId") int projectId);
 
