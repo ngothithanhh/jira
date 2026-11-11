@@ -15,8 +15,8 @@ Người dùng đã duyệt plan sửa bug và cho phép tiếp tục tự độ
 
 | Đợt | Phạm vi | Trạng thái | Commit |
 |---|---|---|---|
-| 1 | JWT, quyền truy cập, nullable issue DTO, transaction issue, số issue đồng thời, vòng đời sprint, refresh rotation | 243 unit/HTTP + 11 PostgreSQL đạt; đã tự kiểm tra | Xem git log |
-| 2 | Sprint backlog và product backlog, thứ tự issue | Chờ agent chính kiểm tra plan | Chưa commit |
+| 1 | JWT, quyền truy cập, nullable issue DTO, transaction issue, số issue đồng thời, vòng đời sprint, refresh rotation | 243 unit/HTTP + 11 PostgreSQL đạt; đã tự kiểm tra | ea1e39a |
+| 2 | Sprint backlog và product backlog, thứ tự issue | 263 unit/HTTP + 16 PostgreSQL đạt; đã tự kiểm tra | Xem git log |
 | 3 | Issue trên board, di chuyển, vị trí và WIP | Chờ plan chi tiết | Chưa commit |
 | 4 | Chi tiết/xóa issue, tìm kiếm, lọc, phân trang | Chờ plan chi tiết | Chưa commit |
 | 5 | Sửa/xóa sprint, board, column | Chờ plan chi tiết | Chưa commit |
@@ -29,3 +29,5 @@ Người dùng đã duyệt plan sửa bug và cho phép tiếp tục tự độ
 Chỉ ghi test đã thực thi thực tế. Case không chạy do môi trường phải ghi rõ, không được chuyển thành skip để tạo báo cáo xanh. Giữ API tương thích khi có thể; các trường nullable phải trả null đúng nghĩa. Thay đổi schema cần kiểm tra dữ liệu hiện có, không tự xóa hoặc đổi dữ liệu cũ.
 
 Mỗi đợt chỉ commit sau khi agent chính tự kiểm tra và chạy test liên quan. Các bug mới được ghi nhận và xử lý theo quyền tự triển khai đã được giao. Không coi hoàn thiện backend là đã hoàn thiện frontend, vì chưa có mã nguồn FE trong checkout.
+
+Đợt 2: API/giới hạn tại BACKLOG_API.md, plan tại BACKLOG_PLAN.md. Đã tự kiểm tra caller/controller, quyền trước query, thứ tự khóa/refresh và nhánh rollback. Hai test DB xác nhận membership và status phải chờ reorder; test lỗi sau flush xác nhận không commit rank dở. Migration 002 chạy hai lần trên cluster PostgreSQL 18.6 riêng. Log `outputs/regression/backlog-unit-final.log` và `backlog-postgres.log`. Không kiểm frontend, tải lớn hay mọi interleaving. Hai reorder cùng scope vẫn theo thứ tự commit, chưa có revision toàn backlog.

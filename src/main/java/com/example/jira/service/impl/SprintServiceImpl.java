@@ -103,6 +103,8 @@ public class SprintServiceImpl implements SprintService {
 
         // Cặp đã có thì giữ nguyên dữ liệu; lịch sử sprint đóng khác không cản lần thêm mới.
         if (!sprintIssueRepository.existsById(new SprintIssueId(sprintId, issueId))) {
+            // Rời product backlog thì bỏ rank cũ; nếu quay lại sẽ xếp sau các vị trí người dùng đã chốt.
+            issue.setBacklogPosition(null);
             saveSprintIssue(sprint, issue);
         }
     }
@@ -122,6 +124,8 @@ public class SprintServiceImpl implements SprintService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy issue"));
         requireSameProject(sprint, issue);
 
+        // Chỉ reset rank khi thật sự gỡ một liên kết, tránh request lặp xóa thứ tự product backlog đã chốt.
+        if (sprintIssueRepository.existsById(new SprintIssueId(sprintId, issueId))) issue.setBacklogPosition(null);
         // Filter cả hai ID giữ nguyên mọi liên kết khác của issue.
         sprintIssueRepository.deleteBySprint_SprintIdAndIssue_IssueId(sprintId, issueId);
     }
@@ -195,6 +199,8 @@ public class SprintServiceImpl implements SprintService {
 
         // Chuyển trực tiếp khi nguồn còn ACTIVE; null đích chỉ gỡ liên kết để việc trở về backlog dự án.
         for (Issue issue : unfinishedIssues) {
+            // Chuyển sang sprint mới hoặc trả backlog đều chưa có rank mới; không đụng thứ tự DONE lịch sử.
+            issue.setBacklogPosition(null);
             sprintIssueRepository.deleteBySprint_SprintIdAndIssue_IssueId(sprintId, issue.getIssueId());
             if (nextSprint != null) {
                 saveSprintIssue(nextSprint, issue);

@@ -37,6 +37,7 @@ public class IssueServiceImpl implements IssueService {
     private final IssueTransitionRepository issueTransitionRepository;
     private final NotificationService notificationService;
     private final WorkflowRuleRepository workflowRuleRepository;
+    private final jakarta.persistence.EntityManager entityManager;
 
     /**
      * Dùng khi người dùng tạo issue; projectId, issueTypeId và parentIssueId là ID DB từ request.
@@ -111,7 +112,8 @@ public class IssueServiceImpl implements IssueService {
     /**
      * Dùng khi sửa nội dung issue; issueId là khóa issues trên URL, request chứa các trường muốn đổi.
      * Đọc issue để lấy ID project và giữ kiểm quyền EDIT_ISSUE trước khi sửa dữ liệu.
-     * Chỉ ghi trường khác null và updated_at; version hiện có phát hiện hai lượt cùng sửa một bản cũ.
+     * Khóa project rồi refresh issue trước khi sửa để dùng chung thứ tự khóa với backlog/sprint.
+     * Chỉ ghi trường khác null và updated_at; version giữ lớp phát hiện bên ghi ngoài khóa project.
      * Lưu và map response trong một transaction; lỗi rollback, lỗi optimistic được xử lý ở tầng HTTP chung.
      */
     @Override
@@ -124,7 +126,8 @@ public class IssueServiceImpl implements IssueService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Bạn không có quyền chỉnh sửa công việc này!");
         }
 
-        // Giữ cách cập nhật từng phần: trường null không xóa giá trị đang có.
+        // Chờ cùng khóa với reorder; đọc lại entity sau khi lượt trước commit, rồi mới cập nhật từng phần.
+        lockAndRefresh(issue);
         if (request.getSummary() != null) issue.setSummary(request.getSummary());
         if (request.getDescription() != null) issue.setDescription(request.getDescription());
         if (request.getPriority() != null) issue.setPriority(request.getPriority());
@@ -150,6 +153,8 @@ public class IssueServiceImpl implements IssueService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Bạn không có quyền gán công việc này!");
         }
 
+        // Dùng chung khóa project với backlog và trạng thái; refresh bỏ dữ liệu đọc trước khi chờ khóa.
+        lockAndRefresh(issue);
         // Cặp project/user bảo đảm người nhận thuộc dự án của issue, không chỉ tồn tại trong bảng users.
         if (assigneeId == null) {
             issue.setAssignee(null);
@@ -177,7 +182,8 @@ public class IssueServiceImpl implements IssueService {
      * Gửi lại trạng thái hiện tại trả ngay, không ghi lịch sử/thông báo; không coi đây là chống trùng mọi request.
      * Lưu issue_transitions (issue, nguồn, đích, user, thời điểm), rồi đổi issues.status/updated_at và tạo notification.
      * Cả ba loại bản ghi dùng chung transaction; lỗi notification hoặc version làm rollback toàn bộ.
-     * Hai lượt cùng đọc trạng thái cũ chỉ một lượt ghi được version đó; không tự retry lượt thua.
+     * Khóa project rồi refresh trước kiểm workflow: hai lượt cùng project xử lý trên trạng thái đã commit mới nhất.
+     * Version vẫn chặn bên ghi không dùng khóa; không tự retry lỗi.
      */
     @Override
     @Transactional
@@ -188,14 +194,16 @@ public class IssueServiceImpl implements IssueService {
         if (!projectSecurity.hasPermission(issue.getProject().getProjectId(), PermissionName.EDIT_ISSUE)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Bạn không có quyền thay đổi trạng thái công việc này!");
         }
+        // Trạng thái quyết định scope product backlog; phải khóa chung trước kiểm tra hoặc thay đổi status.
+        lockAndRefresh(issue);
         IssueStatus toStatus = issueStatusRepository.findById(statusId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Trạng thái không hợp lệ!"));
 
         // Trạng thái không đổi không phát sinh lịch sử; trạng thái mới phải có cạnh workflow cho phép.
-        if (issue.getStatus().getStatusId() == statusId) {
+        if (issue.getStatus() != null && issue.getStatus().getStatusId() == statusId) {
             return IssueMapper.toResponse(issue);
         }
-        if (!workflowRuleRepository.existsByFromStatus_StatusIdAndToStatus_StatusId(issue.getStatus().getStatusId(), statusId)) {
+        if (issue.getStatus() == null || !workflowRuleRepository.existsByFromStatus_StatusIdAndToStatus_StatusId(issue.getStatus().getStatusId(), statusId)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Chuyển đổi trạng thái không hợp lệ theo quy trình (Workflow)!");
         }
 
@@ -244,5 +252,16 @@ public class IssueServiceImpl implements IssueService {
         }
         List<Issue> issues = issueRepository.findByProject_ProjectId(projectId);
         return issues.stream().map(IssueMapper::toResponse).toList();
+    }
+
+    /**
+     * Caller đã tìm issues.issue_id và kiểm EDIT_ISSUE; khóa projects.project_id của issue trước mọi ghi.
+     * Refresh sau khóa để status/version không còn là bản đọc cũ trong lúc chờ reorder hoặc sprint mutation.
+     * Chỉ khóa/đọc; caller giữ transaction đến cuối và tự ghi trường cần đổi, không retry hay đổi project.
+     */
+    private void lockAndRefresh(Issue issue) {
+        projectRepository.findByIdForUpdate(issue.getProject().getProjectId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy dự án!"));
+        entityManager.refresh(issue);
     }
 }

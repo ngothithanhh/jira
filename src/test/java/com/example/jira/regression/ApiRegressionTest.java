@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.*;
         IssueCommentController.class, IssueAttachmentController.class, IssueTypeController.class,
         IssueStatusController.class, UserRoleController.class, PermissionController.class,
         RolePermissionController.class, WorkflowController.class, BoardController.class,
-        SprintController.class, NotificationController.class}, properties = {
+        SprintController.class, NotificationController.class, BacklogController.class}, properties = {
         "app.jwt.secret=" + SecurityRegressionTest.SECRET, "app.jwt.expiration=60000"})
 @Import({SecurityConfig.class, JwtUtil.class, CorsConfig.class})
 class ApiRegressionTest {
@@ -58,6 +58,25 @@ class ApiRegressionTest {
     @MockBean BoardService boards;
     @MockBean SprintService sprints;
     @MockBean NotificationService notifications;
+    @MockBean com.example.jira.service.impl.BacklogService backlog;
+
+    // Validation HTTP chặn body thiếu/null/ID không dương trước khi gọi service.
+    @ParameterizedTest @ValueSource(strings = {"{}", "{\"issueIds\":null}", "{\"issueIds\":[null]}", "{\"issueIds\":[0]}"})
+    void invalidBacklogOrderIsBadRequest(String body) throws Exception {
+        mvc.perform(put("/api/projects/10/backlog/order").header("Authorization", bearer()).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(backlog);
+    }
+    // Cả bốn route gọi đúng scope và giữ thứ tự JSON của service.
+    @Test void backlogRoutesUseProjectAndSprintIds() throws Exception {
+        mvc.perform(get("/api/projects/10/backlog").header("Authorization", bearer())).andExpect(status().isOk());
+        mvc.perform(get("/api/sprints/100/issues").header("Authorization", bearer())).andExpect(status().isOk());
+        String body = "{\"issueIds\":[6,5]}";
+        mvc.perform(put("/api/projects/10/backlog/order").header("Authorization", bearer()).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk());
+        mvc.perform(put("/api/sprints/100/issues/order").header("Authorization", bearer()).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk());
+        verify(backlog).product(10); verify(backlog).sprint(100);
+        verify(backlog).orderProduct(10,java.util.List.of(6,5)); verify(backlog).orderSprint(100,java.util.List.of(6,5));
+    }
 
     // Các endpoint nghiệp vụ phải chặn request chưa có danh tính trước khi gọi service.
     @ParameterizedTest @ValueSource(strings = {"/api/user", "/api/projects/getList", "/api/projects/10",

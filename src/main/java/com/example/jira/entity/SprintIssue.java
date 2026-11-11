@@ -31,4 +31,7 @@ public class SprintIssue {
     @Column(name = "added_at")
     private LocalDateTime addedAt;
 
+    // Vị trí chỉ thuộc cặp sprint/issue này; không sửa thứ tự của lịch sử sprint khác.
+    private Integer position;
+
 }

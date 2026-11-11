@@ -85,7 +85,7 @@ class PostgresRegressionIT {
     @Configuration @EntityScan("com.example.jira.entity")
     @EnableJpaRepositories("com.example.jira.repository")
     @Import({BoardServiceImpl.class, SprintServiceImpl.class, IssueServiceImpl.class, RefreshTokenServiceImpl.class,
-            AuthServiceImpl.class, DatabaseSeeder.class})
+            AuthServiceImpl.class, BacklogService.class, DatabaseSeeder.class})
     static class Config {
         // Cleanup container chạy khi context đóng; local cluster do script dừng sau khi Maven kết thúc.
         @Bean org.springframework.beans.factory.DisposableBean postgresCleanup() {
@@ -119,6 +119,7 @@ class PostgresRegressionIT {
     @Autowired IssueServiceImpl issueService;
     @Autowired RefreshTokenServiceImpl refreshService;
     @Autowired AuthServiceImpl authService;
+    @Autowired BacklogService backlogService;
     @Autowired DatabaseSeeder seeder;
     User caller;
     Project project;
@@ -253,6 +254,109 @@ class PostgresRegressionIT {
         assertThatThrownBy(() -> issueService.changeIssueStatus(id, toId)).hasMessageContaining("notification unavailable");
         assertThat(jdbc.queryForObject("select status_id from issues where issue_id=?", Integer.class, id)).isEqualTo(from.getStatusId());
         assertThat(jdbc.queryForObject("select count(*) from issue_transitions where issue_id=?", Integer.class, id)).isZero();
+    }
+    // JPQL phải giữ status null, loại DONE theo category và chỉ loại link FUTURE/ACTIVE, không loại lịch sử CLOSED.
+    @Test void productBacklogFiltersActualDatabaseScopeAndKeepsNullRelations() throws Exception {
+        var sql = java.nio.file.Files.readString(java.nio.file.Path.of("scripts/migrations/002_backlog_order.sql"));
+        jdbc.execute(sql); jdbc.execute(sql);
+        var plain = persistedIssue();
+        var completed = additionalIssue(2); completed.setStatus(statuses.saveAndFlush(Fixtures.status(0,"Completed",StatusCategory.DONE))); issues.saveAndFlush(completed);
+        var open = additionalIssue(3); var historical = additionalIssue(4);
+        var future = persistedSprint(SprintState.FUTURE); var closed = persistedSprint(SprintState.CLOSED);
+        saveLink(future,open); saveLink(closed,historical);
+        assertThat(backlogService.product(project.getProjectId())).extracting(com.example.jira.dto.issue.IssueResponse::getIssueId)
+                .containsExactly(plain.getIssueId(),historical.getIssueId());
+        assertThat(backlogService.sprint(closed.getSprintId())).extracting(com.example.jira.dto.issue.IssueResponse::getIssueId).containsExactly(historical.getIssueId());
+    }
+    // Rank thật được commit và đọc lại từ transaction khác; request stale không được đổi phần nào của thứ tự.
+    @Test void backlogOrdersPersistAndStaleOrderDoesNotWrite() {
+        var a = persistedIssue(); var b = additionalIssue(2); var sprint = persistedSprint(SprintState.FUTURE);
+        int projectId = project.getProjectId(); when(security.hasPermission(projectId,PermissionName.EDIT_ISSUE)).thenReturn(true);
+        backlogService.orderProduct(projectId,List.of(b.getIssueId(),a.getIssueId()));
+        assertThat(backlogService.product(projectId)).extracting(com.example.jira.dto.issue.IssueResponse::getIssueId).containsExactly(b.getIssueId(),a.getIssueId());
+        assertThatThrownBy(() -> backlogService.orderProduct(projectId,List.of(a.getIssueId())))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        assertThat(issues.findById(b.getIssueId()).orElseThrow().getBacklogPosition()).isZero();
+        when(security.hasPermission(projectId,PermissionName.MANAGE_SPRINT)).thenReturn(true);
+        sprintService.addIssueToSprint(sprint.getSprintId(),a.getIssueId()); sprintService.addIssueToSprint(sprint.getSprintId(),b.getIssueId());
+        backlogService.orderSprint(sprint.getSprintId(),List.of(b.getIssueId(),a.getIssueId()));
+        assertThat(backlogService.sprint(sprint.getSprintId())).extracting(com.example.jira.dto.issue.IssueResponse::getIssueId).containsExactly(b.getIssueId(),a.getIssueId());
+        sprintService.removeIssueFromSprint(sprint.getSprintId(),b.getIssueId());
+        assertThat(issues.findById(b.getIssueId()).orElseThrow().getBacklogPosition()).isNull();
+        assertThat(backlogService.product(projectId)).extracting(com.example.jira.dto.issue.IssueResponse::getIssueId).containsExactly(b.getIssueId());
+    }
+    // Lỗi sau saveAll nhưng trước commit phải rollback tất cả rank đã gán, không chỉ dừng response.
+    @Test void failedBacklogWriteRollsBackAllPositions() {
+        var a = persistedIssue(); var b = additionalIssue(2); int projectId = project.getProjectId();
+        when(security.hasPermission(projectId,PermissionName.EDIT_ISSUE)).thenReturn(true);
+        var factory = new ProxyFactory(); factory.setInterfaces(IssueRepository.class); factory.setTarget(issues);
+        factory.addAdvice((MethodInterceptor) invocation -> {
+            Object result = invocation.proceed();
+            if (invocation.getMethod().getName().equals("saveAll")) { em.flush(); throw new IllegalStateException("forced write failure"); }
+            return result;
+        });
+        Object target = AopTestUtils.getUltimateTargetObject(backlogService); ReflectionTestUtils.setField(target,"issues",factory.getProxy());
+        try {
+            assertThatThrownBy(() -> backlogService.orderProduct(projectId,List.of(b.getIssueId(),a.getIssueId()))).hasMessageContaining("forced write failure");
+            assertThat(issues.findById(a.getIssueId()).orElseThrow().getBacklogPosition()).isNull();
+            assertThat(issues.findById(b.getIssueId()).orElseThrow().getBacklogPosition()).isNull();
+        } finally { ReflectionTestUtils.setField(target,"issues",issues); }
+    }
+    // Reorder giữ snapshot dưới khóa; cả thêm sprint lẫn chuyển DONE phải chờ trước khi thay scope.
+    @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(booleans = {false,true})
+    void membershipAndStatusWaitForBacklogReorder(boolean changeStatus) throws Exception {
+        var issue = persistedIssue(); var from = statuses.saveAndFlush(Fixtures.status(0,"Todo",StatusCategory.TO_DO));
+        var done = statuses.saveAndFlush(Fixtures.status(0,"Completed",StatusCategory.DONE));
+        issue.setStatus(from); issue = issues.saveAndFlush(issue);
+        var rule = new WorkflowRule(); rule.setFromStatus(from); rule.setToStatus(done); workflow.saveAndFlush(rule);
+        var sprint = persistedSprint(SprintState.FUTURE); int id = issue.getIssueId(), projectId = project.getProjectId(), callerId = caller.getUserId();
+        when(security.hasPermission(eq(projectId),any())).thenReturn(true);
+        var snapshot = new CountDownLatch(1); var release = new CountDownLatch(1); var writerAtLock = new CountDownLatch(1);
+        var reader = new ProxyFactory(); reader.setInterfaces(IssueRepository.class); reader.setTarget(issues);
+        reader.addAdvice((MethodInterceptor) invocation -> {
+            Object result = invocation.proceed();
+            if (invocation.getMethod().getName().equals("findProductBacklog")) {
+                snapshot.countDown(); if (!release.await(10,TimeUnit.SECONDS)) throw new IllegalStateException("reorder release timeout");
+            }
+            return result;
+        });
+        var writer = new ProxyFactory(); writer.setInterfaces(ProjectRepository.class); writer.setTarget(projects);
+        writer.addAdvice((MethodInterceptor) invocation -> {
+            if (invocation.getMethod().getName().equals("findByIdForUpdate")) writerAtLock.countDown();
+            return invocation.proceed();
+        });
+        Object readerTarget = AopTestUtils.getUltimateTargetObject(backlogService);
+        Object writerTarget = AopTestUtils.getUltimateTargetObject(changeStatus ? issueService : sprintService);
+        ReflectionTestUtils.setField(readerTarget,"issues",reader.getProxy()); ReflectionTestUtils.setField(writerTarget,"projectRepository",writer.getProxy());
+        var pool = Executors.newFixedThreadPool(2);
+        try {
+            var reorder = pool.submit(() -> backlogService.orderProduct(projectId,List.of(id)));
+            assertThat(snapshot.await(10,TimeUnit.SECONDS)).isTrue();
+            var mutation = pool.submit(() -> {
+                Fixtures.login(callerId);
+                try { if (changeStatus) issueService.changeIssueStatus(id,done.getStatusId()); else sprintService.addIssueToSprint(sprint.getSprintId(),id); }
+                finally { org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
+            });
+            assertThat(writerAtLock.await(10,TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> mutation.get(200,TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
+            release.countDown(); reorder.get(10,TimeUnit.SECONDS); mutation.get(10,TimeUnit.SECONDS);
+            assertThat(backlogService.product(projectId)).isEmpty();
+        } finally {
+            release.countDown(); pool.shutdownNow(); pool.awaitTermination(10,TimeUnit.SECONDS);
+            ReflectionTestUtils.setField(readerTarget,"issues",issues); ReflectionTestUtils.setField(writerTarget,"projectRepository",projects);
+        }
+    }
+    // Các helper chỉ tạo fixture đã commit trong DB test; không thay thuật toán production.
+    private Sprint persistedSprint(SprintState state) {
+        var sprint = new Sprint(); sprint.setProject(project); sprint.setState(state); return sprints.saveAndFlush(sprint);
+    }
+    private Issue additionalIssue(int number) {
+        var issue = new Issue(); issue.setProject(project); issue.setSummary("Task " + number);
+        issue.setIssueNumber(number); issue.setIssueKey("P0-" + number); return issues.saveAndFlush(issue);
+    }
+    private void saveLink(Sprint sprint, Issue issue) {
+        var link = new SprintIssue(); link.setId(new SprintIssueId(sprint.getSprintId(),issue.getIssueId()));
+        link.setSprint(sprint); link.setIssue(issue); backlog.saveAndFlush(link);
     }
     // Ghi issue tối thiểu hợp lệ; không cần assignee/cha vì các cột này cho phép null.
     private Issue persistedIssue() {

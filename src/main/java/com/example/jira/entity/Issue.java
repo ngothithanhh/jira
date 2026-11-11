@@ -46,6 +46,10 @@ public class Issue {
     @Column(name = "story_points")
     private int storyPoints;
 
+    // Thứ tự product backlog; null dành cho việc mới hoặc vừa trả từ sprint.
+    @Column(name = "backlog_position")
+    private Integer backlogPosition;
+
     @Column(nullable = false, name = "issue_key")
     private String issueKey;
 

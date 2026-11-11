@@ -11,6 +11,14 @@ import java.util.Collection;
 
 @Repository
 public interface SprintIssueRepository extends JpaRepository<SprintIssue, SprintIssueId> {
+    // Fetch đủ các quan hệ mapper sử dụng trong transaction đọc backlog; không loại quan hệ tùy chọn null.
+    @org.springframework.data.jpa.repository.Query("""
+            select si from SprintIssue si join fetch si.issue i join fetch i.project
+            left join fetch i.status left join fetch i.issueType left join fetch i.reporter
+            left join fetch i.assignee left join fetch i.parentIssue
+            where si.sprint.sprintId = :sprintId
+            """)
+    List<SprintIssue> findBacklog(@org.springframework.data.repository.query.Param("sprintId") int sprintId);
     List<SprintIssue> findBySprint_SprintId(int sprintId);
     void deleteBySprint_SprintIdAndIssue_IssueId(int sprintId, int issueId);
 

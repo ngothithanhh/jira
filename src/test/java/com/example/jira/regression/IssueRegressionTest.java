@@ -25,6 +25,7 @@ import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class IssueRegressionTest {
+    @Mock jakarta.persistence.EntityManager entityManager;
     @Mock ProjectSecurity security;
     @Mock ProjectRepository projects;
     @Mock IssueTypeRepository types;
@@ -37,7 +38,11 @@ class IssueRegressionTest {
     @Mock NotificationService notifications;
     @Mock WorkflowRuleRepository workflow;
     @InjectMocks IssueServiceImpl service;
-    @BeforeEach void identifyCaller() { Fixtures.login(1); }
+    @BeforeEach void identifyCaller() {
+        Fixtures.login(1);
+        // Case thiếu quyền/ID dừng trước khóa; case ghi hợp lệ phải có project để lấy khóa chung.
+        lenient().when(projects.findByIdForUpdate(10)).thenReturn(Optional.of(Fixtures.project(10)));
+    }
     @AfterEach void clearIdentity() { SecurityContextHolder.clearContext(); }
 
     // Thiếu quyền tạo phải bị chặn trước khi đọc cấu hình và ghi issue.
@@ -51,6 +56,7 @@ class IssueRegressionTest {
     @Test void missingProjectStopsCreate() {
         var r = new CreateIssueRequest(); r.setProjectId(10);
         when(security.hasPermission(10, PermissionName.CREATE_ISSUE)).thenReturn(true);
+        when(projects.findByIdForUpdate(10)).thenReturn(Optional.empty());
         assertThatThrownBy(() -> service.createIssue(r)).isInstanceOfSatisfying(ResponseStatusException.class,
                 e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND));
         verify(projects).findByIdForUpdate(10);

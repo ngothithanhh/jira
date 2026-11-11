@@ -13,6 +13,17 @@ import java.util.Optional;
 
 @Repository
 public interface IssueRepository extends JpaRepository<Issue,Integer> {
+    // Giữ issue thiếu status/assignee/parent; loại DONE và mọi liên kết sprint mở ngay trong truy vấn.
+    @Query("""
+            select i from Issue i join fetch i.project
+            left join fetch i.status st left join fetch i.issueType
+            left join fetch i.reporter left join fetch i.assignee left join fetch i.parentIssue
+            where i.project.projectId = :projectId
+              and (st.statusCategory is null or st.statusCategory <> com.example.jira.enums.StatusCategory.DONE)
+              and not exists (select si from SprintIssue si where si.issue = i
+                and si.sprint.state in (com.example.jira.enums.SprintState.FUTURE, com.example.jira.enums.SprintState.ACTIVE))
+            """)
+    List<Issue> findProductBacklog(@Param("projectId") int projectId);
     
     /**
      * Đọc số issue lớn nhất trong project để createIssue cấp số tiếp theo, không ghi DB.
