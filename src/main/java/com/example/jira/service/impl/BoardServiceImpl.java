@@ -32,6 +32,7 @@ public class BoardServiceImpl implements BoardService {
     private final IssueStatusRepository issueStatusRepository;
     private final BoardColumnStatusRepository boardColumnStatusRepository;
     private final ProjectSecurity projectSecurity;
+    private final jakarta.persistence.EntityManager entityManager;
 
     /** request.projectId là ID projects sở hữu board mới. Chỉ MANAGE_BOARD của chính dự án mới được lưu boards và ba cột mặc định; thiếu quyền thì 403. */
     @Override
@@ -134,7 +135,13 @@ public class BoardServiceImpl implements BoardService {
             throw new AccessDeniedException("Không có quyền thực hiện");
         }
         
+        // Mapping thay đổi cách đếm WIP và hiển thị card; dùng khóa project chung trước sửa cấu hình.
+        lockColumn(column);
         IssueStatus status = issueStatusRepository.findById(statusId).orElseThrow(() -> new NotFoundException("Không tìm thấy trạng thái"));
+        if (boardColumnStatusRepository.findBoardMappings(column.getBoard().getBoardId()).stream().anyMatch(mapping ->
+                mapping.getIssueStatus().getStatusId() == statusId && mapping.getBoardColumn().getColumnId() != columnId)) {
+            throw new ConflictException("Trạng thái đã map vào cột khác của board");
+        }
 
         BoardColumnStatus bcs = new BoardColumnStatus();
         bcs.setId(new BoardColumnStatusId(columnId, statusId));
@@ -179,6 +186,8 @@ public class BoardServiceImpl implements BoardService {
         }
 
         BoardColumnStatusId id = new BoardColumnStatusId(columnId, statusId);
+        // Không thay mapping giữa lúc move đang kiểm WIP hoặc đổi trạng thái.
+        lockColumn(column);
         BoardColumnStatus bcs = boardColumnStatusRepository.findById(id)
                 .orElseThrow(() -> new ConflictException("Trạng thái này chưa được ánh xạ vào cột"));
 
@@ -194,5 +203,12 @@ public class BoardServiceImpl implements BoardService {
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy bảng"));
         List<BoardColumn> columns = boardColumnRepository.findByBoard_BoardIdOrderByPositionAsc(boardId);
         return BoardMapper.toResponse(board, columns);
+    }
+
+    /** Caller đã kiểm MANAGE_BOARD; khóa project sở hữu cột rồi refresh để cấu hình mới nhất dùng chung với move. */
+    private void lockColumn(BoardColumn column) {
+        projectRepository.findByIdForUpdate(column.getBoard().getProject().getProjectId())
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy dự án"));
+        entityManager.refresh(column);
     }
 }

@@ -133,6 +133,10 @@ class ScrumRegressionTest {
 
     @Nested @ExtendWith(MockitoExtension.class)
     class Boards {
+        @Mock jakarta.persistence.EntityManager entityManager;
+        @BeforeEach void projectLock() {
+            lenient().when(projects.findByIdForUpdate(10)).thenReturn(Optional.of(Fixtures.project(10)));
+        }
         @Mock BoardRepository boards;
         @Mock ProjectRepository projects;
         @Mock BoardColumnRepository columns;

@@ -38,6 +38,7 @@ public class IssueServiceImpl implements IssueService {
     private final NotificationService notificationService;
     private final WorkflowRuleRepository workflowRuleRepository;
     private final jakarta.persistence.EntityManager entityManager;
+    private final BoardWipPolicy boardWipPolicy;
 
     /**
      * Dùng khi người dùng tạo issue; projectId, issueTypeId và parentIssueId là ID DB từ request.
@@ -95,6 +96,8 @@ public class IssueServiceImpl implements IssueService {
                 .findFirst()
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "Chưa cấu hình trạng thái TO_DO trong hệ thống!"));
         issue.setStatus(defaultStatus);
+        // Cột TO_DO cũng có thể giới hạn WIP; issue mới chưa có ID nên dùng 0 để không loại việc đang tồn tại.
+        boardWipPolicy.validate(project.getProjectId(),defaultStatus.getStatusId(),0);
 
         // Khóa project vẫn được giữ từ trước MAX đến hết commit; DB unique chặn các bên ghi không lấy khóa.
         int maxIssueNumber = issueRepository.findMaxIssueNumberByProjectId(project.getProjectId()).orElse(0);
@@ -106,7 +109,7 @@ public class IssueServiceImpl implements IssueService {
         issue.setStoryPoints(0);
 
         // Lưu issue rồi map response trong transaction; lỗi lưu/map đều rollback, không trả kết quả tạo dở.
-        return IssueMapper.toResponse(issueRepository.save(issue));
+        return saveResponse(issue);
     }
 
     /**
@@ -133,7 +136,7 @@ public class IssueServiceImpl implements IssueService {
         if (request.getPriority() != null) issue.setPriority(request.getPriority());
         if (request.getStoryPoints() != null) issue.setStoryPoints(request.getStoryPoints());
         issue.setUpdatedAt(LocalDateTime.now());
-        return IssueMapper.toResponse(issueRepository.save(issue));
+        return saveResponse(issue);
     }
 
     /**
@@ -173,7 +176,7 @@ public class IssueServiceImpl implements IssueService {
 
         // Version của issue chặn hai lượt cùng ghi trên một phiên bản; lỗi sẽ rollback cả thông báo đã tạo.
         issue.setUpdatedAt(LocalDateTime.now());
-        return IssueMapper.toResponse(issueRepository.save(issue));
+        return saveResponse(issue);
     }
 
     /**
@@ -206,6 +209,8 @@ public class IssueServiceImpl implements IssueService {
         if (issue.getStatus() == null || !workflowRuleRepository.existsByFromStatus_StatusIdAndToStatus_StatusId(issue.getStatus().getStatusId(), statusId)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Chuyển đổi trạng thái không hợp lệ theo quy trình (Workflow)!");
         }
+        // Dùng chung chính sách WIP với kéo board để đổi status trực tiếp không đi vòng giới hạn cột.
+        boardWipPolicy.validate(issue.getProject().getProjectId(),statusId,issueId);
 
         // Lưu nguồn trước khi thay issue.status để lịch sử giữ đúng cặp trạng thái và người thao tác.
         IssueTransition transition = new IssueTransition();
@@ -237,6 +242,8 @@ public class IssueServiceImpl implements IssueService {
            (issue.getReporter() == null || issue.getReporter().getUserId() != issue.getAssignee().getUserId())) {
             notificationService.sendNotification(issue.getAssignee().getUserId(), issueId, actorId, NotificationType.ISSUE_STATUS_CHANGED, message);
         }
+        // Flush trước mapper để version trả cho client khớp bản ghi vừa cập nhật trong transaction này.
+        entityManager.flush();
         return IssueMapper.toResponse(savedIssue);
     }
 
@@ -263,5 +270,10 @@ public class IssueServiceImpl implements IssueService {
         projectRepository.findByIdForUpdate(issue.getProject().getProjectId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy dự án!"));
         entityManager.refresh(issue);
+    }
+
+    /** Caller đã kiểm quyền và giữ transaction/khóa project; lưu, flush rồi map version mới, lỗi rollback cả luồng. */
+    private IssueResponse saveResponse(Issue issue) {
+        Issue saved = issueRepository.save(issue); entityManager.flush(); return IssueMapper.toResponse(saved);
     }
 }

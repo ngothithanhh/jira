@@ -20,6 +20,7 @@ public class IssueMapper {
         // Chỉ lấy ID của quan hệ đang có; giữ nguyên cách map project, trạng thái và loại công việc.
         return IssueResponse.builder()
                 .issueId(issue.getIssueId())
+                .version(issue.getVersion())
                 .issueKey(issue.getIssueKey())
                 .summary(issue.getSummary())
                 .description(issue.getDescription())

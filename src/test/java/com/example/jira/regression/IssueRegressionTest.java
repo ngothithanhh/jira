@@ -26,6 +26,7 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class IssueRegressionTest {
     @Mock jakarta.persistence.EntityManager entityManager;
+    @Mock com.example.jira.service.impl.BoardWipPolicy boardWipPolicy;
     @Mock ProjectSecurity security;
     @Mock ProjectRepository projects;
     @Mock IssueTypeRepository types;

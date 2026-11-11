@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.*;
         IssueCommentController.class, IssueAttachmentController.class, IssueTypeController.class,
         IssueStatusController.class, UserRoleController.class, PermissionController.class,
         RolePermissionController.class, WorkflowController.class, BoardController.class,
-        SprintController.class, NotificationController.class, BacklogController.class}, properties = {
+        SprintController.class, NotificationController.class, BacklogController.class, BoardCardController.class}, properties = {
         "app.jwt.secret=" + SecurityRegressionTest.SECRET, "app.jwt.expiration=60000"})
 @Import({SecurityConfig.class, JwtUtil.class, CorsConfig.class})
 class ApiRegressionTest {
@@ -59,6 +59,20 @@ class ApiRegressionTest {
     @MockBean SprintService sprints;
     @MockBean NotificationService notifications;
     @MockBean com.example.jira.service.impl.BacklogService backlog;
+    @MockBean com.example.jira.service.impl.BoardCardService cards;
+
+    // Move bắt buộc version; thiếu hoặc âm không được đi vào nghiệp vụ.
+    @ParameterizedTest @ValueSource(strings = {"{}", "{\"columnId\":60,\"statusId\":1,\"position\":0}", "{\"columnId\":60,\"statusId\":1,\"position\":0,\"expectedVersion\":-1}"})
+    void boardMoveRequiresVersion(String body) throws Exception {
+        mvc.perform(put("/api/boards/50/issues/5/move").header("Authorization",bearer()).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isBadRequest());
+        verifyNoInteractions(cards);
+    }
+    @Test void boardCardRoutesPreserveConcurrencyToken() throws Exception {
+        mvc.perform(get("/api/boards/50/issues").header("Authorization",bearer())).andExpect(status().isOk());
+        mvc.perform(put("/api/boards/50/issues/5/move").header("Authorization",bearer()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"columnId\":60,\"statusId\":1,\"position\":0,\"expectedVersion\":7}")).andExpect(status().isOk());
+        verify(cards).cards(50); verify(cards).move(eq(50),eq(5),argThat(body -> body.getExpectedVersion() == 7L));
+    }
 
     // Validation HTTP chặn body thiếu/null/ID không dương trước khi gọi service.
     @ParameterizedTest @ValueSource(strings = {"{}", "{\"issueIds\":null}", "{\"issueIds\":[null]}", "{\"issueIds\":[0]}"})

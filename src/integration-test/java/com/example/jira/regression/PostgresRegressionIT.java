@@ -85,7 +85,7 @@ class PostgresRegressionIT {
     @Configuration @EntityScan("com.example.jira.entity")
     @EnableJpaRepositories("com.example.jira.repository")
     @Import({BoardServiceImpl.class, SprintServiceImpl.class, IssueServiceImpl.class, RefreshTokenServiceImpl.class,
-            AuthServiceImpl.class, BacklogService.class, DatabaseSeeder.class})
+            AuthServiceImpl.class, BacklogService.class, BoardCardService.class, BoardWipPolicy.class, DatabaseSeeder.class})
     static class Config {
         // Cleanup container chạy khi context đóng; local cluster do script dừng sau khi Maven kết thúc.
         @Bean org.springframework.beans.factory.DisposableBean postgresCleanup() {
@@ -120,6 +120,9 @@ class PostgresRegressionIT {
     @Autowired RefreshTokenServiceImpl refreshService;
     @Autowired AuthServiceImpl authService;
     @Autowired BacklogService backlogService;
+    @Autowired BoardCardService boardCardService;
+    @Autowired BoardIssueRepository boardRanks;
+    @Autowired BoardColumnStatusRepository boardMappings;
     @Autowired DatabaseSeeder seeder;
     User caller;
     Project project;
@@ -144,7 +147,7 @@ class PostgresRegressionIT {
         String sql = java.nio.file.Files.readString(java.nio.file.Path.of("scripts/migrations/001_issue_uniqueness.sql"));
         jdbc.execute(sql); jdbc.execute(sql);
         var original = persistedIssue();
-        var duplicate = Fixtures.issue(0, project.getProjectId()); duplicate.setProject(project);
+        var duplicate = new Issue(); duplicate.setSummary("Duplicate number"); duplicate.setProject(project);
         duplicate.setIssueType(original.getIssueType()); duplicate.setStatus(original.getStatus());
         duplicate.setIssueNumber(original.getIssueNumber()); duplicate.setIssueKey("OTHER-KEY");
         assertThatThrownBy(() -> issues.saveAndFlush(duplicate))
@@ -346,6 +349,82 @@ class PostgresRegressionIT {
             ReflectionTestUtils.setField(readerTarget,"issues",issues); ReflectionTestUtils.setField(writerTarget,"projectRepository",projects);
         }
     }
+    // Cùng version chỉ một move được commit; lượt sau đọc version mới dưới khóa và trả 409.
+    @Test void concurrentMovesOfSameCardRejectStaleVersion() throws Exception {
+        var fixture = moveFixture(0); var issue = fixture.issue();
+        var results = race(() -> outcome(() -> authenticatedMove(fixture,issue)));
+        assertOneSuccessAndConflict(results);
+        assertThat(jdbc.queryForObject("select count(*) from issue_transitions where issue_id=?",Integer.class,issue.getIssueId())).isEqualTo(1);
+        assertThat(issues.findById(issue.getIssueId()).orElseThrow().getVersion()).isGreaterThan(issue.getVersion());
+        assertThat(boardCardService.cards(fixture.board().getBoardId())).singleElement().satisfies(card -> {
+            assertThat(card.columnId()).isEqualTo(fixture.target().getColumnId());
+            assertThat(card.version()).isEqualTo(issues.findById(issue.getIssueId()).orElseThrow().getVersion());
+        });
+    }
+    // Hai card khác nhau tranh một chỗ WIP: lượt sau đếm lại dưới khóa, không vượt giới hạn.
+    @Test void concurrentCardsCannotOverflowWip() throws Exception {
+        var fixture = moveFixture(1); var other = additionalIssue(2); other.setStatus(fixture.issue().getStatus()); other = issues.saveAndFlush(other);
+        List<Issue> candidates = List.of(fixture.issue(),other); var index = new java.util.concurrent.atomic.AtomicInteger();
+        var results = race(() -> { var card = candidates.get(index.getAndIncrement()); return outcome(() -> authenticatedMove(fixture,card)); });
+        assertOneSuccessAndConflict(results);
+        assertThat(issues.countInBoardColumn(project.getProjectId(),fixture.target().getColumnId(),0)).isEqualTo(1);
+        assertThat(boardRanks.count()).isEqualTo(1);
+    }
+    // Không thể đi vòng WIP bằng API đổi status; lỗi notification sau kiểm WIP cũng rollback rank/status/history.
+    @Test void directStatusAndFailedMovePreserveWipAndAtomicity() {
+        var fixture = moveFixture(1); var occupied = additionalIssue(2); occupied.setStatus(fixture.to()); occupied = issues.saveAndFlush(occupied);
+        int id = fixture.issue().getIssueId();
+        assertThatThrownBy(() -> issueService.changeIssueStatus(id,fixture.to().getStatusId()))
+                .isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException.class,e -> assertThat(e.getStatusCode().value()).isEqualTo(409));
+        assertThat(boardRanks.count()).isZero();
+        occupied.setStatus(fixture.issue().getStatus()); issues.saveAndFlush(occupied);
+        var recipient = Fixtures.user(0); recipient.setEmail("board-recipient@test.invalid"); recipient = users.saveAndFlush(recipient);
+        var updated = issues.findById(id).orElseThrow(); updated.setAssignee(recipient); updated = issues.saveAndFlush(updated);
+        doThrow(new IllegalStateException("notification unavailable")).when(notifications).sendNotification(anyInt(),any(),any(),any(),anyString());
+        var request = moveRequest(fixture,updated);
+        assertThatThrownBy(() -> boardCardService.move(fixture.board().getBoardId(),id,request)).hasMessageContaining("notification unavailable");
+        assertThat(issues.findById(id).orElseThrow().getStatus().getStatusId()).isEqualTo(fixture.issue().getStatus().getStatusId());
+        assertThat(boardRanks.count()).isZero(); assertThat(jdbc.queryForObject("select count(*) from issue_transitions",Integer.class)).isZero();
+    }
+    // Move chỉ đổi vị trí cũng tăng version; token cũ không được dùng để kéo lại lần nữa.
+    @Test void sameColumnReorderIncrementsVersionAndMappingIsExclusive() {
+        var fixture = moveFixture(0); var issue = fixture.issue(); var body = moveRequest(fixture,issue);
+        var initial = boardCardService.move(fixture.board().getBoardId(),issue.getIssueId(),body);
+        body.setExpectedVersion(initial.version());
+        var reordered = boardCardService.move(fixture.board().getBoardId(),issue.getIssueId(),body);
+        assertThat(reordered.version()).isGreaterThan(initial.version());
+        assertThatThrownBy(() -> boardCardService.move(fixture.board().getBoardId(),issue.getIssueId(),body))
+                .isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException.class,e -> assertThat(e.getStatusCode().value()).isEqualTo(409));
+        var other = persistedColumn(fixture.board(),"Other",3);
+        assertThatThrownBy(() -> boardService.mapStatusToColumn(other.getColumnId(),fixture.to().getStatusId()))
+                .isInstanceOf(com.example.jira.exception.ConflictException.class);
+        assertThat(boardMappings.findBoardMappings(fixture.board().getBoardId())).hasSize(1);
+    }
+    private void assertOneSuccessAndConflict(List<Outcome> results) {
+        assertThat(results.stream().filter(result -> result.failure() == null)).hasSize(1);
+        assertThat(results.stream().filter(result -> result.failure() != null).toList()).singleElement().satisfies(result ->
+                assertThat(result.failure()).isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException.class,e -> assertThat(e.getStatusCode().value()).isEqualTo(409)));
+    }
+    // Mỗi request chạy ở thread riêng cần danh tính riêng; không kế thừa SecurityContext của thread JUnit.
+    private com.example.jira.dto.board.BoardCardResponse authenticatedMove(MoveFixture fixture,Issue issue) {
+        Fixtures.login(caller.getUserId());
+        try { return boardCardService.move(fixture.board().getBoardId(),issue.getIssueId(),moveRequest(fixture,issue)); }
+        finally { org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
+    }
+    private MoveFixture moveFixture(int limit) {
+        var issue = persistedIssue(); var from = statuses.saveAndFlush(Fixtures.status(0,"Todo",StatusCategory.TO_DO));
+        var to = statuses.saveAndFlush(Fixtures.status(0,"Doing",StatusCategory.IN_PROGRESS)); issue.setStatus(from); issue = issues.saveAndFlush(issue);
+        var rule = new WorkflowRule(); rule.setFromStatus(from); rule.setToStatus(to); workflow.saveAndFlush(rule);
+        var board = persistedBoard("Team"); var column = persistedColumn(board,"Doing",1); column.setWipLimit(limit); column = columns.saveAndFlush(column);
+        var mapping = new BoardColumnStatus(); mapping.setId(new BoardColumnStatusId(column.getColumnId(),to.getStatusId())); mapping.setBoardColumn(column); mapping.setIssueStatus(to); boardMappings.saveAndFlush(mapping);
+        when(security.hasPermission(eq(project.getProjectId()),any())).thenReturn(true);
+        return new MoveFixture(board,column,to,issue);
+    }
+    private com.example.jira.dto.board.MoveBoardIssueRequest moveRequest(MoveFixture fixture,Issue issue) {
+        var body = new com.example.jira.dto.board.MoveBoardIssueRequest(); body.setColumnId(fixture.target().getColumnId()); body.setStatusId(fixture.to().getStatusId());
+        body.setPosition(0); body.setExpectedVersion(issue.getVersion()); return body;
+    }
+    private record MoveFixture(Board board,BoardColumn target,IssueStatus to,Issue issue) { }
     // Các helper chỉ tạo fixture đã commit trong DB test; không thay thuật toán production.
     private Sprint persistedSprint(SprintState state) {
         var sprint = new Sprint(); sprint.setProject(project); sprint.setState(state); return sprints.saveAndFlush(sprint);

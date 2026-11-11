@@ -13,6 +13,8 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 public class IssueResponse {
     private int issueId;
+    // Token chạy đồng thời của issues, dùng expectedVersion khi kéo card trên board.
+    private Long version;
     private String issueKey; // VD: PROJ-123
     private String summary;
     private String description;

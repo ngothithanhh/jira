@@ -13,6 +13,20 @@ import java.util.Optional;
 
 @Repository
 public interface IssueRepository extends JpaRepository<Issue,Integer> {
+    // Card lấy status từ issues; LEFT JOIN giữ việc chưa giao/chưa có trạng thái hoặc cha.
+    @Query("""
+            select i from Issue i join fetch i.project left join fetch i.status left join fetch i.issueType
+            left join fetch i.reporter left join fetch i.assignee left join fetch i.parentIssue
+            where i.project.projectId = :projectId
+            """)
+    List<Issue> findBoardIssues(@Param("projectId") int projectId);
+
+    // Đếm mọi issue hiện thuộc cột theo mapping, kể cả chưa có rank trong board_issues.
+    @Query("""
+            select count(i) from Issue i where i.project.projectId = :projectId and i.issueId <> :excludedId
+            and i.status.statusId in (select m.issueStatus.statusId from BoardColumnStatus m where m.boardColumn.columnId = :columnId)
+            """)
+    long countInBoardColumn(@Param("projectId") int projectId, @Param("columnId") int columnId, @Param("excludedId") int excludedId);
     // Giữ issue thiếu status/assignee/parent; loại DONE và mọi liên kết sprint mở ngay trong truy vấn.
     @Query("""
             select i from Issue i join fetch i.project
