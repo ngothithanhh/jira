@@ -31,6 +31,7 @@ class IssueQueryRegressionTest {
     @Mock ProjectSecurity security;
     @Mock EntityManager entityManager;
     @Mock AuditLogService audit;
+    @Mock com.example.jira.service.impl.SprintMetricsService metrics;
     @Mock TypedQuery<Long> count;
     @Mock Query delete;
     @InjectMocks IssueQueryService service;

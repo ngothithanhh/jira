@@ -3,7 +3,7 @@
 ## Phạm vi và giới hạn
 
 Bộ test bao phủ các chức năng đang triển khai trong backend Spring Boot. Chưa có frontend trong checkout này.
-Không viết test cho API chưa tồn tại: báo cáo Scrum, đổi/quên mật khẩu. Product/sprint backlog, board cards/move, chi tiết/xóa issue và tìm kiếm/phân trang đã có API và test; xem BACKLOG_API.md, BOARD_CARDS_API.md và ISSUE_QUERY_API.md.
+Không viết test cho API chưa tồn tại: đổi/quên mật khẩu. Product/sprint backlog, board cards/move, chi tiết/xóa issue, tìm kiếm/phân trang và báo cáo Scrum đã có API/test; xem các tài liệu API trong docs, gồm SCRUM_REPORT_API.md.
 Không coi coverage cao hoặc mọi test xanh là bằng chứng đã hết bug.
 
 - Unit: JUnit 5, Mockito, AssertJ. Dùng SecurityContext thật với UserPrincipal giả lập.

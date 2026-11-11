@@ -27,6 +27,7 @@ public class IssueQueryService {
     private final ProjectSecurity security;
     private final EntityManager entityManager;
     private final AuditLogService audit;
+    private final SprintMetricsService metrics;
     private static final Set<String> SORTS = Set.of("issueNumber","summary","priority","createdAt","updatedAt");
 
     /** Tra issues.issue_id từ URL, kiểm VIEW_PROJECT theo issue rồi map trong transaction đọc; không ghi DB. */
@@ -81,6 +82,8 @@ public class IssueQueryService {
         }
         String key = issue.getIssueKey(); issues.delete(issue); entityManager.flush();
         audit.logAction("DELETE",EntityType.ISSUE,issueId,"Xóa issue: " + key);
+        // Gỡ issue khỏi ACTIVE thay đổi scope; ghi event cùng transaction delete/audit, không sửa snapshot CLOSED.
+        metrics.captureActiveProject(projectId);
     }
 
     /** Dựng predicate dùng chung cho trang/count; chỉ fetch các quan hệ đơn trên query trả Issue. */

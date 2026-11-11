@@ -86,7 +86,8 @@ class PostgresRegressionIT {
     @EnableJpaRepositories("com.example.jira.repository")
     @Import({BoardServiceImpl.class, SprintServiceImpl.class, IssueServiceImpl.class, RefreshTokenServiceImpl.class,
             AuthServiceImpl.class, BacklogService.class, BoardCardService.class, BoardWipPolicy.class,
-            IssueQueryService.class, AuditLogServiceImpl.class, ContainerManagementService.class, DatabaseSeeder.class})
+            IssueQueryService.class, AuditLogServiceImpl.class, ContainerManagementService.class,
+            SprintMetricsService.class, ScrumReportService.class, DatabaseSeeder.class})
     static class Config {
         // Cleanup container chạy khi context đóng; local cluster do script dừng sau khi Maven kết thúc.
         @Bean org.springframework.beans.factory.DisposableBean postgresCleanup() {
@@ -127,6 +128,10 @@ class PostgresRegressionIT {
     @Autowired IssueQueryService issueQueryService;
     @Autowired AuditLogServiceImpl auditService;
     @Autowired ContainerManagementService containers;
+    @Autowired SprintMetricsService metricService;
+    @Autowired ScrumReportService reports;
+    @Autowired SprintMetricRepository metricRows;
+    @Autowired SprintMetricPointRepository metricPoints;
     @Autowired DatabaseSeeder seeder;
     User caller;
     Project project;
@@ -566,6 +571,60 @@ class PostgresRegressionIT {
     }
     private void addBoardRank(Board board,BoardColumn column,Issue issue) {
         var rank = new BoardIssue(); rank.setId(new BoardIssueId(board.getBoardId(),issue.getIssueId())); rank.setBoard(board); rank.setColumn(column); rank.setIssue(issue); boardRanks.saveAndFlush(rank);
+    }
+    // Snapshot theo các API thật; completed velocity phải giữ nguyên sau sửa và xóa issue CLOSED.
+    @Test void scrumSnapshotsTrackScopeEstimatesStatusAndFreezeVelocity() throws Exception {
+        String sql = java.nio.file.Files.readString(java.nio.file.Path.of("scripts/migrations/004_scrum_metrics.sql")); jdbc.execute(sql); jdbc.execute(sql);
+        var a = persistedIssue(); var b = additionalIssue(2); var from = statuses.saveAndFlush(Fixtures.status(0,"Todo",StatusCategory.TO_DO));
+        var done = statuses.saveAndFlush(Fixtures.status(0,"Completed",StatusCategory.DONE));
+        a.setStatus(from); a.setStoryPoints(5); a = issues.saveAndFlush(a); b.setStatus(from); b.setStoryPoints(3); b = issues.saveAndFlush(b);
+        var rule = new WorkflowRule(); rule.setFromStatus(from); rule.setToStatus(done); workflow.saveAndFlush(rule);
+        var sprint = persistedSprint(SprintState.FUTURE); saveLink(sprint,a); saveLink(sprint,b);
+        int projectId = project.getProjectId(), sprintId = sprint.getSprintId(); when(security.hasPermission(eq(projectId),any())).thenReturn(true);
+        sprintService.startSprint(sprintId);
+        assertThat(reports.summary(sprintId).committedPoints()).isEqualTo(8); assertThat(reports.burndown(sprintId).baselineAvailable()).isTrue();
+        var estimate = new com.example.jira.dto.issue.UpdateIssueRequest(); estimate.setStoryPoints(8); issueService.updateIssue(a.getIssueId(),estimate);
+        issueService.changeIssueStatus(b.getIssueId(),done.getStatusId());
+        sprintService.removeIssueFromSprint(sprintId,a.getIssueId()); sprintService.addIssueToSprint(sprintId,a.getIssueId());
+        sprintService.completeSprint(sprintId,null);
+        assertThat(reports.burndown(sprintId).points()).extracting(com.example.jira.dto.report.ScrumReport.Point::remainingPoints).containsExactly(8L,11L,8L,0L,8L,0L);
+        var velocity = reports.velocity(projectId,10).get(0); assertThat(velocity.committedPoints()).isEqualTo(8); assertThat(velocity.completedPoints()).isEqualTo(3);
+        estimate.setStoryPoints(100); var updated = issueService.updateIssue(b.getIssueId(),estimate);
+        assertThat(reports.velocity(projectId,10).get(0).completedPoints()).isEqualTo(3);
+        issueQueryService.delete(b.getIssueId(),updated.getVersion());
+        assertThat(reports.summary(sprintId).current().totalPoints()).isZero(); assertThat(reports.velocity(projectId,10).get(0).completedPoints()).isEqualTo(3);
+        assertThat(metricPoints.count()).isEqualTo(6);
+    }
+    // Legacy không được trình bày như đã quan sát lúc bắt đầu; CLOSED thiếu snapshot trả null thay vì đoán.
+    @Test void legacyScrumReportsExposeMissingHistory() {
+        var closed = persistedSprint(SprintState.CLOSED); var active = persistedSprint(SprintState.ACTIVE); var issue = persistedIssue(); saveLink(active,issue);
+        when(security.hasPermission(eq(project.getProjectId()),any())).thenReturn(true);
+        assertThat(reports.burndown(closed.getSprintId()).points()).isEmpty(); assertThat(reports.summary(closed.getSprintId()).committedPoints()).isNull();
+        var update = new com.example.jira.dto.issue.UpdateIssueRequest(); update.setStoryPoints(4); issueService.updateIssue(issue.getIssueId(),update);
+        assertThat(metricRows.findBySprint_SprintId(active.getSprintId()).orElseThrow().getOrigin()).isEqualTo("OBSERVED");
+        assertThat(reports.burndown(active.getSprintId()).baselineAvailable()).isFalse();
+        sprintService.completeSprint(active.getSprintId(),null);
+        assertThat(reports.velocity(project.getProjectId(),10)).hasSize(2);
+        var legacy = reports.velocity(project.getProjectId(),10).stream().filter(value -> value.sprintId()==closed.getSprintId()).findFirst().orElseThrow();
+        assertThat(legacy.completedPoints()).isNull(); assertThat(legacy.completionAvailable()).isFalse();
+    }
+    // Lỗi ghi point rollback cả ACTIVE/start và CLOSED/finish, không để snapshot dở khác state sprint.
+    @Test void metricFailureRollsBackStartAndCompletion() {
+        var sprint = persistedSprint(SprintState.FUTURE); when(security.hasPermission(project.getProjectId(),PermissionName.MANAGE_SPRINT)).thenReturn(true);
+        var factory = new ProxyFactory(); factory.setInterfaces(SprintMetricPointRepository.class); factory.setTarget(metricPoints);
+        factory.addAdvice((MethodInterceptor) invocation -> { Object result=invocation.proceed(); if (invocation.getMethod().getName().equals("save")) throw new IllegalStateException("metric point failed"); return result; });
+        Object target = AopTestUtils.getUltimateTargetObject(metricService); ReflectionTestUtils.setField(target,"points",factory.getProxy());
+        try {
+            assertThatThrownBy(() -> sprintService.startSprint(sprint.getSprintId())).hasMessageContaining("metric point failed");
+            assertThat(sprints.findById(sprint.getSprintId()).orElseThrow().getState()).isEqualTo(SprintState.FUTURE);
+            assertThat(metricRows.count()).isZero(); assertThat(metricPoints.count()).isZero();
+        } finally { ReflectionTestUtils.setField(target,"points",metricPoints); }
+        sprintService.startSprint(sprint.getSprintId()); ReflectionTestUtils.setField(target,"points",factory.getProxy());
+        try {
+            assertThatThrownBy(() -> sprintService.completeSprint(sprint.getSprintId(),null)).hasMessageContaining("metric point failed");
+            assertThat(sprints.findById(sprint.getSprintId()).orElseThrow().getState()).isEqualTo(SprintState.ACTIVE);
+            assertThat(metricRows.findBySprint_SprintId(sprint.getSprintId()).orElseThrow().getFinishedAt()).isNull(); assertThat(metricPoints.count()).isEqualTo(1);
+        } finally { ReflectionTestUtils.setField(target,"points",metricPoints); }
     }
     // Các helper chỉ tạo fixture đã commit trong DB test; không thay thuật toán production.
     private Sprint persistedSprint(SprintState state) {

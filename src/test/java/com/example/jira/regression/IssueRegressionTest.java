@@ -27,6 +27,7 @@ import static org.mockito.Mockito.*;
 class IssueRegressionTest {
     @Mock jakarta.persistence.EntityManager entityManager;
     @Mock com.example.jira.service.impl.BoardWipPolicy boardWipPolicy;
+    @Mock com.example.jira.service.impl.SprintMetricsService metrics;
     @Mock ProjectSecurity security;
     @Mock ProjectRepository projects;
     @Mock IssueTypeRepository types;
@@ -70,6 +71,12 @@ class IssueRegressionTest {
         verify(issues, never()).save(any()); verifyNoInteractions(security);
     }
     // Chỉnh sửa chỉ áp dụng trường có trong request, giữ các trường khác.
+    @Test void negativeEstimateIsBadRequestBeforeRead() {
+        var request = new UpdateIssueRequest(); request.setStoryPoints(-1);
+        assertThatThrownBy(() -> service.updateIssue(5,request)).isInstanceOfSatisfying(ResponseStatusException.class,error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
+        verifyNoInteractions(issues,security,metrics);
+    }
+    // Chỉnh sửa hợp lệ giữ các trường không gửi.
     @Test void partialUpdatePreservesOtherFields() {
         var issue = Fixtures.issue(5, 10); issue.setDescription("keep"); issue.setPriority("HIGH");
         when(issues.findById(5)).thenReturn(Optional.of(issue));

@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.*;
         IssueCommentController.class, IssueAttachmentController.class, IssueTypeController.class,
         IssueStatusController.class, UserRoleController.class, PermissionController.class,
         RolePermissionController.class, WorkflowController.class, BoardController.class,
-        SprintController.class, NotificationController.class, BacklogController.class, BoardCardController.class, IssueQueryController.class, ContainerManagementController.class}, properties = {
+        SprintController.class, NotificationController.class, BacklogController.class, BoardCardController.class, IssueQueryController.class, ContainerManagementController.class, ScrumReportController.class}, properties = {
         "app.jwt.secret=" + SecurityRegressionTest.SECRET, "app.jwt.expiration=60000"})
 @Import({SecurityConfig.class, JwtUtil.class, CorsConfig.class})
 class ApiRegressionTest {
@@ -62,6 +62,14 @@ class ApiRegressionTest {
     @MockBean com.example.jira.service.impl.BoardCardService cards;
     @MockBean com.example.jira.service.impl.IssueQueryService queryIssues;
     @MockBean com.example.jira.service.impl.ContainerManagementService containers;
+    @MockBean com.example.jira.service.impl.ScrumReportService reports;
+
+    @Test void reportRoutesUseSprintAndProjectScopes() throws Exception {
+        mvc.perform(get("/api/sprints/100/reports/summary").header("Authorization",bearer())).andExpect(status().isOk());
+        mvc.perform(get("/api/sprints/100/reports/burndown").header("Authorization",bearer())).andExpect(status().isOk());
+        mvc.perform(get("/api/projects/10/reports/velocity?limit=5").header("Authorization",bearer())).andExpect(status().isOk());
+        verify(reports).summary(100); verify(reports).burndown(100); verify(reports).velocity(10,5);
+    }
 
     @Test void containerRoutesCallCorrectScope() throws Exception {
         mvc.perform(patch("/api/sprints/100").header("Authorization",bearer()).contentType(MediaType.APPLICATION_JSON).content("{\"goal\":\"Ship\"}")).andExpect(status().isOk());

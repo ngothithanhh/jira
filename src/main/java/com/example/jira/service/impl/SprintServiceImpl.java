@@ -33,6 +33,7 @@ public class SprintServiceImpl implements SprintService {
     private final SprintIssueRepository sprintIssueRepository;
     private final ProjectSecurity projectSecurity;
     private final EntityManager entityManager;
+    private final SprintMetricsService metrics;
 
     /**
      * Tạo bản nháp FUTURE trong projects.project_id do request gửi, sau khi kiểm tra MANAGE_SPRINT.
@@ -106,6 +107,8 @@ public class SprintServiceImpl implements SprintService {
             // Rời product backlog thì bỏ rank cũ; nếu quay lại sẽ xếp sau các vị trí người dùng đã chốt.
             issue.setBacklogPosition(null);
             saveSprintIssue(sprint, issue);
+            // Liên kết ACTIVE thay đổi scope burndown; query snapshot flush cùng transaction hiện tại.
+            metrics.captureActiveProject(sprint.getProject().getProjectId());
         }
     }
 
@@ -128,6 +131,8 @@ public class SprintServiceImpl implements SprintService {
         if (sprintIssueRepository.existsById(new SprintIssueId(sprintId, issueId))) issue.setBacklogPosition(null);
         // Filter cả hai ID giữ nguyên mọi liên kết khác của issue.
         sprintIssueRepository.deleteBySprint_SprintIdAndIssue_IssueId(sprintId, issueId);
+        // Ghi sự thay đổi scope sau khi gỡ, không snapshot FUTURE hoặc sửa commitment lúc bắt đầu.
+        metrics.captureActiveProject(sprint.getProject().getProjectId());
     }
 
     /**
@@ -151,6 +156,8 @@ public class SprintServiceImpl implements SprintService {
         // Chỉ ghi sprints.state khi mọi điều kiện đã đạt; giữ nguyên ngày tùy chọn và backlog.
         sprint.setState(SprintState.ACTIVE);
         sprintRepository.save(sprint);
+        // Chụp commitment đúng lúc bắt đầu; lỗi lưu snapshot rollback cả chuyển ACTIVE.
+        metrics.start(sprint);
     }
 
     /**
@@ -197,6 +204,8 @@ public class SprintServiceImpl implements SprintService {
             }
         }
 
+        // Chốt completed trước khi gỡ việc chưa DONE để velocity không phụ thuộc membership sau chuyển.
+        metrics.finish(sprint);
         // Chuyển trực tiếp khi nguồn còn ACTIVE; null đích chỉ gỡ liên kết để việc trở về backlog dự án.
         for (Issue issue : unfinishedIssues) {
             // Chuyển sang sprint mới hoặc trả backlog đều chưa có rank mới; không đụng thứ tự DONE lịch sử.
@@ -210,6 +219,9 @@ public class SprintServiceImpl implements SprintService {
         // Đóng sau cùng; transaction giữ khóa đến commit/rollback và giữ nguyên liên kết DONE.
         sprint.setState(SprintState.CLOSED);
         sprintRepository.save(sprint);
+        // Event cuối phản ánh scope còn lại; đích ACTIVE nhận việc cũng được capture trong cùng transaction.
+        metrics.captureClosed(sprint);
+        metrics.captureActiveProject(sprint.getProject().getProjectId());
     }
 
     /**

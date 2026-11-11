@@ -19,6 +19,7 @@ import static org.mockito.Mockito.*;
 class ScrumRegressionTest {
     @Nested @ExtendWith(MockitoExtension.class)
     class Sprints {
+        @Mock SprintMetricsService metrics;
         @Mock jakarta.persistence.EntityManager entityManager;
         @Mock SprintRepository sprints;
         @Mock ProjectRepository projects;

@@ -39,6 +39,7 @@ public class IssueServiceImpl implements IssueService {
     private final WorkflowRuleRepository workflowRuleRepository;
     private final jakarta.persistence.EntityManager entityManager;
     private final BoardWipPolicy boardWipPolicy;
+    private final SprintMetricsService metrics;
 
     /**
      * Dùng khi người dùng tạo issue; projectId, issueTypeId và parentIssueId là ID DB từ request.
@@ -126,6 +127,8 @@ public class IssueServiceImpl implements IssueService {
     @Override
     @Transactional
     public IssueResponse updateIssue(int issueId, UpdateIssueRequest request) {
+        // Estimate âm không có nghĩa trong Scrum; chặn trước khi đọc/ghi để report mới không phát sinh số âm.
+        if (request.getStoryPoints() != null && request.getStoryPoints() < 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Story points không được âm");
         // Issue không tồn tại trả 404; người không có quyền trên project của issue trả 403.
         Issue issue = issueRepository.findById(issueId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy công việc!"));
@@ -140,7 +143,10 @@ public class IssueServiceImpl implements IssueService {
         if (request.getPriority() != null) issue.setPriority(request.getPriority());
         if (request.getStoryPoints() != null) issue.setStoryPoints(request.getStoryPoints());
         issue.setUpdatedAt(LocalDateTime.now());
-        return saveResponse(issue);
+        IssueResponse response = saveResponse(issue);
+        // Estimate thay đổi ảnh hưởng burndown ACTIVE; các trường nội dung khác không tạo điểm report thừa.
+        if (request.getStoryPoints() != null) metrics.captureActiveProject(issue.getProject().getProjectId());
+        return response;
     }
 
     /**
@@ -248,6 +254,8 @@ public class IssueServiceImpl implements IssueService {
         }
         // Flush trước mapper để version trả cho client khớp bản ghi vừa cập nhật trong transaction này.
         entityManager.flush();
+        // Status quyết định remaining points; snapshot cùng transaction để lỗi không để lịch sử/report lệch nhau.
+        metrics.captureActiveProject(issue.getProject().getProjectId());
         return IssueMapper.toResponse(savedIssue);
     }
 
