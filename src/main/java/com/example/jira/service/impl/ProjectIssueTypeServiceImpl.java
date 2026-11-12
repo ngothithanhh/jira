@@ -1,124 +1,85 @@
 package com.example.jira.service.impl;
-
 import com.example.jira.dto.issue.issue_type.ProjectIssueTypeResponse;
-import com.example.jira.entity.IssueType;
-import com.example.jira.entity.Project;
-import com.example.jira.entity.ProjectIssueType;
-import com.example.jira.entity.ProjectIssueTypeId;
+import com.example.jira.entity.*;
 import com.example.jira.mapper.ProjectIssueTypeMapper;
-import com.example.jira.repository.IssueRepository;
-import com.example.jira.repository.IssueTypeRepository;
-import com.example.jira.repository.ProjectIssueTypeRepository;
-import com.example.jira.repository.ProjectRepository;
+import com.example.jira.repository.*;
 import com.example.jira.service.ProjectIssueTypeService;
 import com.example.jira.security.ProjectSecurity;
 import com.example.jira.enums.PermissionName;
-import com.example.jira.exception.NotFoundException;
-import com.example.jira.exception.ConflictException;
-import org.springframework.security.access.AccessDeniedException;
+import com.example.jira.exception.*;
+import com.example.jira.ultils.SecurityUtils;
+import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
 import java.util.List;
 
-import static java.util.stream.Collectors.toList;
-
-@Service
-@RequiredArgsConstructor
+@Service @RequiredArgsConstructor
 public class ProjectIssueTypeServiceImpl implements ProjectIssueTypeService {
     private final ProjectSecurity projectSecurity;
     private final ProjectIssueTypeRepository projectIssueTypeRepository;
     private final ProjectRepository projectRepository;
     private final IssueRepository issueRepository;
     private final IssueTypeRepository issueTypeRepository;
+    private final EntityManager entityManager;
 
-    @Override
+    /** Đọc cặp project/issue_type trong transaction để mapper không phụ thuộc OpenEntityManagerInView. */
+    @Override @Transactional(readOnly=true)
     public List<ProjectIssueTypeResponse> getProjectIssueTypes(int projectId){
-        // Không đọc danh sách loại nhiệm vụ cho người ngoài dự án.
-        projectSecurity.requirePermission(projectId, PermissionName.VIEW_PROJECT);
-
-        List<ProjectIssueType> pt = projectIssueTypeRepository.findByProject_ProjectId(projectId);
-
-        return pt.stream().map(ProjectIssueTypeMapper::toResponse).toList();
-
+        projectSecurity.requirePermission(projectId,PermissionName.VIEW_PROJECT);
+        return projectIssueTypeRepository.findByProject_ProjectId(projectId).stream().map(ProjectIssueTypeMapper::toResponse).toList();
     }
 
-    /**
-     * Gán issueTypeId (ID issue_types) vào projectId (ID projects) trong project_issue_types.
-     * Chỉ lead/admin hoặc thành viên có MANAGE_BOARD/UPDATE_PROJECT trên chính dự án mới được thay đổi.
-     * Thiếu quyền thì 403 trước khi đọc/ghi cấu hình; giữ nguyên các kiểm tra và cập nhật nghiệp vụ cũ.
-     */
-    @Override
-    @Transactional
-    public void assignIssueType(int projectId, int issueTypeId, boolean isDefault){
-        // Chặn trước mọi cập nhật, kể cả đổi is_default trên entity đang được JPA theo dõi.
-        projectSecurity.requireIssueTypeManagement(projectId);
-        Project project = projectRepository.findById(projectId).orElseThrow(()->new NotFoundException("Không tìm thấy dự án!"));
-
-        IssueType issueType = issueTypeRepository.findById(issueTypeId).orElseThrow(()->new NotFoundException("Không tìm thấy loại nhiệm vụ!"));
-
-        ProjectIssueTypeId id = new ProjectIssueTypeId(projectId,issueTypeId);
-
-        if(projectIssueTypeRepository.existsById(id))
-            throw new ConflictException("Đã được gán cho dự án rồi!");
-
-        ProjectIssueType projectIssueType = new ProjectIssueType(id, project, issueType, isDefault);
-        projectIssueTypeRepository.save(projectIssueType);
+    /** Gán issue_types.issue_type_id vào projects.project_id; default=true đổi cờ cũ trong cùng transaction đã khóa project. */
+    @Override @Transactional
+    public void assignIssueType(int projectId,int issueTypeId,boolean isDefault){
+        Project project=lockProject(projectId);
+        var type=issueTypeRepository.findById(issueTypeId).orElseThrow(()->new NotFoundException("Không tìm thấy loại nhiệm vụ"));
+        var id=new ProjectIssueTypeId(projectId,issueTypeId);
+        if(projectIssueTypeRepository.existsById(id))throw new ConflictException("Đã được gán cho dự án rồi!");
+        if(isDefault)clearDefaults(projectId);
+        projectIssueTypeRepository.saveAndFlush(new ProjectIssueType(id,project,type,isDefault));
     }
 
-    /**
-     * Đổi is_default của các project_issue_types thuộc projectId sang issueTypeId đã được gán.
-     * Chỉ lead/admin hoặc thành viên có MANAGE_BOARD/UPDATE_PROJECT trên chính dự án mới được thay đổi.
-     * Thiếu quyền thì 403 trước khi đọc/ghi cấu hình; giữ nguyên các kiểm tra và cập nhật nghiệp vụ cũ.
-     */
-    @Override
-    @Transactional
-    public void setDefaultIssueType(int projectId, int issueTypeId){
-        // Chặn trước mọi cập nhật, kể cả đổi is_default trên entity đang được JPA theo dõi.
-        projectSecurity.requireIssueTypeManagement(projectId);
-        List<ProjectIssueType> allTypesInProject = projectIssueTypeRepository.findByProject_ProjectId(projectId);
-
-        boolean found = false;
-        for(ProjectIssueType projectIssueType : allTypesInProject){
-            if(projectIssueType.getIssueType().getIssueTypeId() == issueTypeId){
-                found = true;
-                projectIssueType.setDefault(true);
-            }
-            else {
-                projectIssueType.setDefault(false);
-            }
-        }
-
-        if(!found){
-            throw new NotFoundException("Bảng loại nhiệm vụ này chưa được gán vào dự án!");
-        }
-
-        projectIssueTypeRepository.saveAll(allTypesInProject);
-
-
+    /** Tìm target trước đổi cờ; flush false trước true để unique partial index luôn giữ tối đa một default. */
+    @Override @Transactional
+    public void setDefaultIssueType(int projectId,int issueTypeId){
+        lockProject(projectId);
+        var rows=projectIssueTypeRepository.findByProject_ProjectId(projectId);
+        var target=rows.stream().filter(row->row.getIssueType().getIssueTypeId()==issueTypeId).findFirst()
+            .orElseThrow(()->new NotFoundException("Loại nhiệm vụ chưa được gán vào dự án"));
+        if(target.isDefault())return;
+        clearDefaults(projectId);
+        target.setDefault(true);projectIssueTypeRepository.saveAndFlush(target);
     }
 
-    /**
-     * Gỡ cặp projectId/issueTypeId trong project_issue_types sau khi kiểm tra issue và loại mặc định.
-     * Chỉ lead/admin hoặc thành viên có MANAGE_BOARD/UPDATE_PROJECT trên chính dự án mới được thay đổi.
-     * Thiếu quyền thì 403 trước khi đọc/ghi cấu hình; giữ nguyên các kiểm tra và cập nhật nghiệp vụ cũ.
-     */
-    @Override
-    @Transactional
-    public void removeIssueType(int projectId, int issueTypeId){
-        // Chặn trước mọi cập nhật, kể cả đổi is_default trên entity đang được JPA theo dõi.
+    /** Gỡ đúng cặp khóa; loại mặc định hoặc còn issue trong chính project trả409, không thay loại của issue. */
+    @Override @Transactional
+    public void removeIssueType(int projectId,int issueTypeId){
+        lockProject(projectId);
+        var id=new ProjectIssueTypeId(projectId,issueTypeId);
+        var row=projectIssueTypeRepository.findById(id).orElseThrow(()->new NotFoundException("Chưa được gán vào dự án"));
+        if(row.isDefault())throw new ConflictException("Hãy chọn loại mặc định khác trước khi gỡ");
+        if(issueRepository.existsByProject_ProjectIdAndIssueType_IssueTypeId(projectId,issueTypeId))throw new ConflictException("Loại công việc đang được sử dụng");
+        // Project đã refresh có collection cascade ALL; bulk delete tránh Hibernate persist lại child đã remove.
+        if(projectIssueTypeRepository.deleteScoped(projectId,issueTypeId)==0)throw new NotFoundException("Chưa được gán vào dự án");
+    }
+
+    /** Khóa projects trước gán/default/gỡ và refresh actor membership; role cũ khi chờ không được dùng để ghi. */
+    private Project lockProject(int projectId){
         projectSecurity.requireIssueTypeManagement(projectId);
-        boolean hasIssues = issueRepository.existsByProject_ProjectIdAndIssueType_IssueTypeId(projectId,issueTypeId);
-        if(hasIssues)
-            throw new ConflictException("Không thể xóa vì đang được sử dụng!");
+        var project=projectRepository.findByIdForUpdate(projectId).orElseThrow(()->new NotFoundException("Không tìm thấy dự án"));
+        entityManager.refresh(project);
+        var member=entityManager.find(ProjectMember.class,new ProjectMemberId(projectId,SecurityUtils.getCurrentUserId()));
+        if(member!=null)try{entityManager.refresh(member);}catch(jakarta.persistence.EntityNotFoundException removed){throw new org.springframework.security.access.AccessDeniedException("Bạn không còn là thành viên dự án");}
+        projectSecurity.requireIssueTypeManagement(projectId);
+        return project;
+    }
 
-        ProjectIssueTypeId id = new ProjectIssueTypeId(projectId,issueTypeId);
-        ProjectIssueType projectIssueType = projectIssueTypeRepository.findById(id).orElseThrow(()->new NotFoundException("Chưa được gán vào dự án!"));
-
-        if(projectIssueType.isDefault())
-            throw new ConflictException("Không thể gỡ bỏ vì đang được cấu hình là mặc định. Hãy chọn 1 loại khác làm mặc định trước!");
-
-        projectIssueTypeRepository.deleteById(id);
+    /** Chỉ đổi các cờ true thuộc project đã khóa; flush trước ghi default mới, lỗi sẽ rollback toàn bộ transaction. */
+    private void clearDefaults(int projectId){
+        var rows=projectIssueTypeRepository.findByProject_ProjectId(projectId);
+        rows.forEach(row->row.setDefault(false));
+        projectIssueTypeRepository.saveAll(rows);projectIssueTypeRepository.flush();
     }
 }

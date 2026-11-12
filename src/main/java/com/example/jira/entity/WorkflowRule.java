@@ -7,7 +7,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @Entity
-@Table(name = "workflow_rules")
+@Table(name = "workflow_rules",uniqueConstraints=@UniqueConstraint(name="uq_workflow_edge",columnNames={"from_status_id","to_status_id"}))
 @NoArgsConstructor
 @AllArgsConstructor
 @Getter

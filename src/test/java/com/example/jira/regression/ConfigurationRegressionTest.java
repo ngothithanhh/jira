@@ -151,27 +151,28 @@ class ConfigurationRegressionTest {
         @Mock ProjectIssueTypeRepository projects;
         @Mock IssueRepository issues;
         @InjectMocks IssueTypeServiceImpl service;
+        @BeforeEach void existingType(){var row=new IssueType();row.setIssueTypeId(7);lenient().when(types.findById(7)).thenReturn(Optional.of(row));}
         // Loại đang bật trong project không được xóa.
         @Test void configuredTypeCannotBeDeleted() {
             when(projects.existsByIssueType_IssueTypeId(7)).thenReturn(true);
-            assertThatThrownBy(() -> service.deleteIssueType(7)).hasMessageContaining("cấu hình"); verify(types, never()).deleteById(anyInt());
+            assertThatThrownBy(() -> service.deleteIssueType(7)).hasMessageContaining("dự án"); verify(types, never()).deleteById(anyInt());
         }
         // Loại đã có issue sử dụng cũng phải giữ lại.
         @Test void usedTypeCannotBeDeleted() {
             when(issues.existsByIssueType_IssueTypeId(7)).thenReturn(true);
-            assertThatThrownBy(() -> service.deleteIssueType(7)).hasMessageContaining("Task"); verify(types, never()).deleteById(anyInt());
+            assertThatThrownBy(() -> service.deleteIssueType(7)).hasMessageContaining("sử dụng"); verify(types, never()).deleteById(anyInt());
         }
         // Loại không còn tham chiếu được xóa đúng ID.
-        @Test void unusedTypeCanBeDeleted() { service.deleteIssueType(7); verify(types).deleteById(7); }
+        @Test void unusedTypeCanBeDeleted() { when(types.deleteCatalogRow(7)).thenReturn(1);service.deleteIssueType(7); verify(types).deleteCatalogRow(7); }
         // Tạo issue type giữ tên và kiểm tra DTO trả về.
         @Test void createTypePreservesName() {
-            when(types.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(types.saveAndFlush(any())).thenAnswer(i -> i.getArgument(0));
             var r = new IssueTypeRequest(); r.setTypeName("Bug");
             assertThat(service.createIssueType(r).getTypeName()).isEqualTo("Bug");
         }
         // Không tìm thấy issue type khi cập nhật không được save.
         @Test void updateMissingTypeIsRejected() {
-            assertThatThrownBy(() -> service.updateIssueType(7, new IssueTypeRequest())).hasMessageContaining("Issue Type");
+            assertThatThrownBy(() -> service.updateIssueType(8, typeRequest("Missing"))).hasMessageContaining("Issue Type");
             verify(types, never()).save(any());
         }
     }
@@ -180,16 +181,44 @@ class ConfigurationRegressionTest {
         @Mock GlobalSecurity globalSecurity;
         @Mock IssueStatusRepository statuses;
         @Mock IssueRepository issues;
+        @Mock BoardColumnStatusRepository mappings; @Mock WorkflowRuleRepository rules; @Mock IssueTransitionRepository transitions;
         @InjectMocks IssueStatusServiceImpl service;
+        @BeforeEach void existingStatus(){lenient().when(statuses.findById(3)).thenReturn(Optional.of(Fixtures.status(3,"Done",StatusCategory.DONE)));}
+        // Nhóm không đổi sau tạo; từ chối trước sửa tên để bảo toàn ý nghĩa lịch sử Scrum.
+        @Test void categoryIsImmutableAndRenamePreservesLinks() {
+            assertThatThrownBy(()->service.updateStatus(3,statusRequest("Reopened",StatusCategory.TO_DO))).hasMessageContaining("cố định");
+            verify(statuses,never()).saveAndFlush(any());
+            when(statuses.saveAndFlush(any())).thenAnswer(i->i.getArgument(0));
+            var response=service.updateStatus(3,statusRequest(" Finished ",StatusCategory.DONE));
+            assertThat(response.getStatusName()).isEqualTo("Finished");assertThat(response.getStatusCategory()).isEqualTo(StatusCategory.DONE);
+        }
+        // Lịch sử còn tham chiếu thì không xóa status dù không còn issue hiện tại dùng nó.
+        @Test void historicalStatusCannotBeDeleted() {
+            when(transitions.existsByFromStatus_StatusIdOrToStatus_StatusId(3,3)).thenReturn(true);
+            assertThatThrownBy(()->service.deleteStatus(3)).hasMessageContaining("lịch sử");verify(statuses,never()).deleteById(anyInt());
+        }
+        @Test void mappedStatusCannotBeDeleted() {
+            when(mappings.existsByIssueStatus_StatusId(3)).thenReturn(true);
+            assertThatThrownBy(()->service.deleteStatus(3)).hasMessageContaining("mapping");
+            verify(statuses,never()).deleteById(anyInt());verifyNoInteractions(rules,transitions);
+        }
+        @Test void workflowStatusCannotBeDeleted() {
+            when(rules.existsByFromStatus_StatusIdOrToStatus_StatusId(3,3)).thenReturn(true);
+            assertThatThrownBy(()->service.deleteStatus(3)).hasMessageContaining("workflow");verify(statuses,never()).deleteById(anyInt());
+        }
+        @Test void emptyStatusCannotBeSaved() {
+            assertThatThrownBy(()->service.createStatus(statusRequest(" ",StatusCategory.DONE))).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+            verifyNoInteractions(statuses);
+        }
         // Trạng thái trùng tên không được thêm mới.
         @Test void duplicateStatusIsRejected() {
             when(statuses.existsByStatusName("Done")).thenReturn(true);
-            var r = new IssueStatusRequest(); r.setStatusName("Done");
+            var r = new IssueStatusRequest(); r.setStatusName("Done"); r.setStatusCategory(StatusCategory.DONE);
             assertThatThrownBy(() -> service.createStatus(r)).hasMessageContaining("đã có"); verify(statuses, never()).save(any());
         }
         // Tạo trạng thái giữ cả tên hiển thị và nhóm DONE.
         @Test void createStatusPreservesCategory() {
-            when(statuses.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(statuses.saveAndFlush(any())).thenAnswer(i -> i.getArgument(0));
             var r = new IssueStatusRequest(); r.setStatusName("Completed"); r.setStatusCategory(StatusCategory.DONE);
             assertThat(service.createStatus(r).getStatusCategory()).isEqualTo(StatusCategory.DONE);
         }
@@ -200,7 +229,7 @@ class ConfigurationRegressionTest {
         }
         // Cập nhật trạng thái không tồn tại không được tạo mới.
         @Test void missingStatusUpdateIsRejected() {
-            assertThatThrownBy(() -> service.updateStatus(3, new IssueStatusRequest())).hasMessageContaining("trạng thái");
+            assertThatThrownBy(() -> service.updateStatus(4, statusRequest("Missing",StatusCategory.DONE))).hasMessageContaining("trạng thái");
             verify(statuses, never()).save(any());
         }
     }
@@ -210,6 +239,11 @@ class ConfigurationRegressionTest {
         @Mock WorkflowRuleRepository rules;
         @Mock IssueStatusRepository statuses;
         @InjectMocks WorkflowRuleServiceImpl service;
+        @Test void selfTransitionIsRejectedBeforeDatabaseRead() {
+            var r=request();r.setToStatusId(1);
+            assertThatThrownBy(()->service.createRule(r)).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+            verifyNoInteractions(rules,statuses);
+        }
         // Workflow trùng cặp nguồn/đích phải bị từ chối.
         @Test void duplicateTransitionRuleIsRejected() {
             when(rules.existsByFromStatus_StatusIdAndToStatus_StatusId(1, 2)).thenReturn(true);
@@ -219,8 +253,8 @@ class ConfigurationRegressionTest {
         @Test void rulePreservesDirection() {
             when(statuses.findById(1)).thenReturn(Optional.of(Fixtures.status(1, "To Do", StatusCategory.TO_DO)));
             when(statuses.findById(2)).thenReturn(Optional.of(Fixtures.status(2, "Doing", StatusCategory.IN_PROGRESS)));
-            when(rules.save(any())).thenAnswer(i -> i.getArgument(0)); service.createRule(request());
-            verify(rules).save(argThat(r -> r.getFromStatus().getStatusId() == 1 && r.getToStatus().getStatusId() == 2));
+            when(rules.saveAndFlush(any())).thenAnswer(i -> i.getArgument(0)); service.createRule(request());
+            verify(rules).saveAndFlush(argThat(r -> r.getFromStatus().getStatusId() == 1 && r.getToStatus().getStatusId() == 2));
         }
         // Thiếu trạng thái nguồn không được lưu rule mồ côi.
         @Test void missingSourceStatusIsRejected() {
@@ -244,9 +278,26 @@ class ConfigurationRegressionTest {
         @Mock ProjectRepository projects;
         @Mock IssueRepository issues;
         @Mock IssueTypeRepository types;
+        @Mock jakarta.persistence.EntityManager em;
         @InjectMocks ProjectIssueTypeServiceImpl service;
+        @BeforeEach void lockedProject(){lenient().when(projects.findByIdForUpdate(10)).thenReturn(Optional.of(Fixtures.project(10)));}
+        // Gán default=true phải flush false trước ghi true để không vi phạm unique partial index.
+        @Test void assignDefaultClearsOldBeforeInsert() {
+            var old=link(8,true);when(links.findByProject_ProjectId(10)).thenReturn(List.of(old));
+            var type=new IssueType();type.setIssueTypeId(7);when(types.findById(7)).thenReturn(Optional.of(type));
+            service.assignIssueType(10,7,true);assertThat(old.isDefault()).isFalse();
+            var order=inOrder(links);order.verify(links).saveAll(List.of(old));order.verify(links).flush();
+            order.verify(links).saveAndFlush(argThat(l->l.isDefault()&&l.getIssueType().getIssueTypeId()==7));
+            verify(projectSecurity,times(2)).requireIssueTypeManagement(10);
+        }
+        // Quyền bị thu hồi khi đợi project lock phải chặn ghi dù lần kiểm đầu đã cho phép.
+        @Test void revokedPermissionAfterLockStopsMutation() {
+            doNothing().doThrow(new org.springframework.security.access.AccessDeniedException("revoked")).when(projectSecurity).requireIssueTypeManagement(10);
+            assertThatThrownBy(()->service.assignIssueType(10,7,false)).hasMessageContaining("revoked");verifyNoInteractions(links,types);
+        }
         // Loại có issue dùng trong đúng project thì không gỡ cấu hình.
         @Test void usedTypeCannotBeUnassigned() {
+            when(links.findById(new ProjectIssueTypeId(10,7))).thenReturn(Optional.of(link(7,false)));
             when(issues.existsByProject_ProjectIdAndIssueType_IssueTypeId(10, 7)).thenReturn(true);
             assertThatThrownBy(() -> service.removeIssueType(10, 7)).hasMessageContaining("sử dụng"); verify(links, never()).deleteById(any());
         }
@@ -268,13 +319,16 @@ class ConfigurationRegressionTest {
         }
         // Gán loại tạo khóa ghép project/type, không nhầm loại ở dự án khác.
         @Test void assignStoresScopedCompositeId() {
-            when(projects.findById(10)).thenReturn(Optional.of(Fixtures.project(10)));
+
             var t = new IssueType(); t.setIssueTypeId(7); when(types.findById(7)).thenReturn(Optional.of(t));
-            service.assignIssueType(10, 7, false); verify(links).save(argThat(l -> l.getId().equals(new ProjectIssueTypeId(10, 7))));
+            service.assignIssueType(10, 7, false); verify(links).saveAndFlush(argThat(l -> l.getId().equals(new ProjectIssueTypeId(10, 7))));
         }
         private ProjectIssueType link(int typeId, boolean defaultType) {
             var t = new IssueType(); t.setIssueTypeId(typeId);
             return new ProjectIssueType(new ProjectIssueTypeId(10, typeId), Fixtures.project(10), t, defaultType);
         }
     }
+
+    private static IssueTypeRequest typeRequest(String name){var r=new IssueTypeRequest();r.setTypeName(name);return r;}
+    private static IssueStatusRequest statusRequest(String name,StatusCategory category){var r=new IssueStatusRequest();r.setStatusName(name);r.setStatusCategory(category);return r;}
 }

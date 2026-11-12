@@ -10,6 +10,10 @@ import java.util.List;
 
 @Repository
 public interface ProjectIssueTypeRepository extends JpaRepository<ProjectIssueType,ProjectIssueTypeId> {
+    /** Xóa đúng cặp project/type bằng SQL, tránh cascade persist từ collection project vừa refresh làm sống lại liên kết. */
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.data.jpa.repository.Query("delete from ProjectIssueType t where t.project.projectId=:projectId and t.issueType.issueTypeId=:typeId")
+    int deleteScoped(@org.springframework.data.repository.query.Param("projectId") int projectId,@org.springframework.data.repository.query.Param("typeId") int typeId);
     boolean existsByIssueType_IssueTypeId(int id);
     List<ProjectIssueType> findByProject_ProjectId(int projectId);
     boolean existsById(ProjectIssueTypeId id);

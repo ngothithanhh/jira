@@ -1,91 +1,60 @@
 package com.example.jira.service.impl;
-
-import com.example.jira.dto.issue.CreateIssueRequest;
-import com.example.jira.dto.issue.UpdateIssueRequest;
-import com.example.jira.dto.issue.issue_type.IssueTypeRequest;
-import com.example.jira.dto.issue.issue_type.IssueTypeResponse;
+import com.example.jira.dto.issue.issue_type.*;
 import com.example.jira.entity.IssueType;
-import com.example.jira.enums.PermissionName;
 import com.example.jira.mapper.IssueTypeMapper;
-import com.example.jira.repository.IssueRepository;
-import com.example.jira.repository.IssueTypeRepository;
-import com.example.jira.repository.ProjectIssueTypeRepository;
+import com.example.jira.repository.*;
 import com.example.jira.security.GlobalSecurity;
-import com.example.jira.security.ProjectSecurity;
 import com.example.jira.service.IssueTypeService;
-import com.example.jira.ultils.SecurityUtils;
-import com.example.jira.exception.NotFoundException;
-import com.example.jira.exception.ConflictException;
-import org.springframework.security.access.AccessDeniedException;
+import com.example.jira.exception.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.http.HttpStatus;
 import java.util.List;
-import java.util.stream.Collectors;
 
-@Service
-@RequiredArgsConstructor
+@Service @RequiredArgsConstructor
 public class IssueTypeServiceImpl implements IssueTypeService {
     private final IssueTypeRepository issueTypeRepository;
     private final GlobalSecurity globalSecurity;
     private final ProjectIssueTypeRepository projectIssueTypeRepository;
     private final IssueRepository issueRepository;
 
-    /**
-     * Dùng khi admin sửa cấu hình toàn hệ thống. Tạo tên loại chung trong issue_types từ request; cấu hình này dùng được cho nhiều dự án.
-     * Người gọi phải có SYSTEM_ADMIN trong user_role_assignments; thiếu quyền thì 403 trước mọi đọc/ghi nghiệp vụ.
-     */
-    @Override
+    /** Danh mục dùng chung cho các project; chỉ đọc tên/ID, không có usage count giả hoặc quyền sửa từ project role. */
+    @Override @Transactional(readOnly=true)
+    public List<IssueTypeResponse> getAllIssueTypes(){return issueTypeRepository.findAll().stream().map(IssueTypeMapper::toResponse).toList();}
+
+    /** Admin tạo loại toàn hệ thống từ typeName; tên chuẩn hóa theo giới hạn cột50, DB unique chặn cả hai tạo đồng thời. */
+    @Override @Transactional
     public IssueTypeResponse createIssueType(IssueTypeRequest request){
-        // Chặn user thường trước khi tra ID mục tiêu; biết ID role/quyền không cho phép tự nâng quyền.
-        globalSecurity.assertSystemAdmin();
-        int userId = SecurityUtils.getCurrentUserId();
-
-        IssueType type = new IssueType();
-        type.setTypeName(request.getTypeName());
-
-        return IssueTypeMapper.toResponse(issueTypeRepository.save(type));
+        globalSecurity.assertSystemAdmin();String name=name(request);
+        if(issueTypeRepository.existsByTypeName(name))throw new ConflictException("Tên loại công việc đã có");
+        var row=new IssueType();row.setTypeName(name);
+        return IssueTypeMapper.toResponse(issueTypeRepository.saveAndFlush(row));
     }
 
-    /**
-     * Dùng khi admin sửa cấu hình toàn hệ thống. id là ID issue_types cần đổi tên; không phải ID project_issue_types của một dự án.
-     * Người gọi phải có SYSTEM_ADMIN trong user_role_assignments; thiếu quyền thì 403 trước mọi đọc/ghi nghiệp vụ.
-     */
-    @Override
+    /** id là issue_types.issue_type_id, không phải projectId; đổi tên giữ toàn bộ liên kết project/issue. */
+    @Override @Transactional
     public IssueTypeResponse updateIssueType(int id,IssueTypeRequest request){
-        // Chặn user thường trước khi tra ID mục tiêu; biết ID role/quyền không cho phép tự nâng quyền.
-        globalSecurity.assertSystemAdmin();
-        IssueType issueType = issueTypeRepository.findById(id)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy Issue Type"));
-        issueType.setTypeName(request.getTypeName());
-
-        return IssueTypeMapper.toResponse(issueTypeRepository.save(issueType));
+        globalSecurity.assertSystemAdmin();String name=name(request);
+        var row=issueTypeRepository.findById(id).orElseThrow(()->new NotFoundException("Không tìm thấy Issue Type"));
+        if(issueTypeRepository.existsByTypeNameAndIssueTypeIdNot(name,id))throw new ConflictException("Tên loại công việc đã có");
+        row.setTypeName(name);return IssueTypeMapper.toResponse(issueTypeRepository.saveAndFlush(row));
     }
 
-    /**
-     * Dùng khi admin sửa cấu hình toàn hệ thống. issueTypeId là ID issue_types; giữ kiểm tra project_issue_types và issues đang dùng trước khi xóa.
-     * Người gọi phải có SYSTEM_ADMIN trong user_role_assignments; thiếu quyền thì 403 trước mọi đọc/ghi nghiệp vụ.
-     */
-    @Override
-    public void deleteIssueType(int issueTypeId){
-        // Chặn user thường trước khi tra ID mục tiêu; biết ID role/quyền không cho phép tự nâng quyền.
+    /** Chỉ xóa loại chưa dùng. Bulk delete tránh cascade JPA; FK giữ cấu hình nếu có lượt gán/tạo issue đồng thời. */
+    @Override @Transactional
+    public void deleteIssueType(int id){
         globalSecurity.assertSystemAdmin();
-        boolean usedInProjects = projectIssueTypeRepository.existsByIssueType_IssueTypeId(issueTypeId);
-        if (usedInProjects) {
-            throw new ConflictException("Không thể xóa Issue Type này vì đang được cấu hình sử dụng trong một số dự án.");
-        }
-        boolean hasIssues = issueRepository.existsByIssueType_IssueTypeId(issueTypeId);
-        if (hasIssues) {
-            throw new ConflictException("Không thể xóa vì đã có Task được tạo với Issue Type này.");
-        }
-        issueTypeRepository.deleteById(issueTypeId);
-
+        issueTypeRepository.findById(id).orElseThrow(()->new NotFoundException("Không tìm thấy Issue Type"));
+        if(projectIssueTypeRepository.existsByIssueType_IssueTypeId(id))throw new ConflictException("Loại công việc đang được gán cho dự án");
+        if(issueRepository.existsByIssueType_IssueTypeId(id))throw new ConflictException("Loại công việc đang có công việc sử dụng");
+        if(issueTypeRepository.deleteCatalogRow(id)==0)throw new NotFoundException("Không tìm thấy Issue Type");
     }
-
-    @Override
-    public List<IssueTypeResponse> getAllIssueTypes() {
-        return issueTypeRepository.findAll().stream()
-                .map(IssueTypeMapper ::toResponse)
-                .collect(Collectors.toList());
+    /** Service kiểm cả caller nội bộ không đi qua Bean Validation; trả400 trước ghi tên rỗng/quá dài. */
+    private String name(IssueTypeRequest request){
+        if(request==null||request.getTypeName()==null||request.getTypeName().trim().isEmpty()||request.getTypeName().trim().length()>50)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Tên loại công việc cần 1..50 ký tự");
+        return request.getTypeName().trim();
     }
 }

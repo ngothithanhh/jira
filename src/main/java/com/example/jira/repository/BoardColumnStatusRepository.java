@@ -7,6 +7,7 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public interface BoardColumnStatusRepository extends JpaRepository<BoardColumnStatus, BoardColumnStatusId> {
+    boolean existsByIssueStatus_StatusId(int id);
     @org.springframework.data.jpa.repository.Query("select m from BoardColumnStatus m join fetch m.boardColumn c join fetch m.issueStatus where c.board.boardId = :boardId")
     java.util.List<BoardColumnStatus> findBoardMappings(@org.springframework.data.repository.query.Param("boardId") int boardId);
 

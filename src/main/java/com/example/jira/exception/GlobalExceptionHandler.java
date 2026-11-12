@@ -11,6 +11,11 @@ import org.springframework.web.server.ResponseStatusException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    /** Body sai/validation lỗi trả400 JSON, không để error dispatch trở thành401 hoặc lộ chi tiết parser/SQL. */
+    @ExceptionHandler({org.springframework.web.bind.MethodArgumentNotValidException.class,org.springframework.http.converter.HttpMessageNotReadableException.class})
+    public ResponseEntity<ApiError> invalidBody(Exception exception) {
+        return ResponseEntity.badRequest().body(ApiError.of(HttpStatus.BAD_REQUEST,"Dữ liệu không hợp lệ"));
+    }
     /** Multipart vượt giới hạn thực của server trả413, không chuyển thành upload thành công hoặc lỗi500. */
     @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
     public ResponseEntity<ApiError> uploadTooLarge(org.springframework.web.multipart.MaxUploadSizeExceededException exception) {

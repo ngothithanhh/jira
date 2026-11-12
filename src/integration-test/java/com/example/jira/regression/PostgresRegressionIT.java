@@ -90,7 +90,7 @@ class PostgresRegressionIT {
             SprintMetricsService.class, ScrumReportService.class, AccountManagementService.class,
             ProjectMemberServiceImpl.class, UserRoleServiceImpl.class, com.example.jira.security.GlobalSecurity.class,
             com.example.jira.security.CustomUserDetailsService.class, IssueCommentServiceImpl.class,
-            NotificationInboxService.class, AdminQueryService.class, DatabaseSeeder.class, IssueAttachmentServiceImpl.class})
+            NotificationInboxService.class, AdminQueryService.class, DatabaseSeeder.class, IssueAttachmentServiceImpl.class,ProjectIssueTypeServiceImpl.class,WorkflowRuleServiceImpl.class,IssueStatusServiceImpl.class,IssueTypeServiceImpl.class})
     static class Config {
         // Cleanup container chạy khi context đóng; local cluster do script dừng sau khi Maven kết thúc.
         @Bean org.springframework.beans.factory.DisposableBean postgresCleanup() {
@@ -158,6 +158,10 @@ class PostgresRegressionIT {
     @Autowired NotificationRepository notificationRows;
     @Autowired AdminQueryService adminQueries;
     @Autowired DatabaseSeeder seeder;
+    @Autowired ProjectIssueTypeServiceImpl configurationTypes;
+    @Autowired WorkflowRuleServiceImpl configurationWorkflow;
+    @Autowired IssueStatusServiceImpl configurationStatus;
+    @Autowired IssueTypeServiceImpl configurationCatalog;
     User caller;
     Project project;
 
@@ -988,6 +992,75 @@ class PostgresRegressionIT {
         var results=race(()->{Fixtures.login(caller.getUserId());try{return outcome(()->{attachmentService.deleteAttachment(saved.getAttachmentId());return true;});}finally{org.springframework.security.core.context.SecurityContextHolder.clearContext();}});
         assertThat(results.stream().filter(r->r.failure()==null).count()).isEqualTo(1);assertThat(attachmentRows.count()).isZero();assertThat(attachmentContentRows.count()).isZero();
     }
+
+    // Migration chạy hai lần không đổi dữ liệu; DB giữ tối đa một default và một cạnh cùng hướng.
+    @Test void configurationMigrationIsRepeatableAndConstraintsAreEnforced() throws Exception {
+        String sql=java.nio.file.Files.readString(java.nio.file.Path.of("scripts/migrations/009_configuration_integrity.sql"));jdbc.execute(sql);jdbc.execute(sql);
+        var a=new IssueType();a.setTypeName("Task");a=types.saveAndFlush(a);
+        var b=new IssueType();b.setTypeName("Bug");b=types.saveAndFlush(b);
+        configurationTypes.assignIssueType(project.getProjectId(),a.getIssueTypeId(),true);
+        int id=b.getIssueTypeId();
+        assertThatThrownBy(()->projectTypes.saveAndFlush(new ProjectIssueType(new ProjectIssueTypeId(project.getProjectId(),id),project,types.findById(id).orElseThrow(),true)))
+            .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        assertThat(projectTypes.findByProject_ProjectId(project.getProjectId())).hasSize(1);
+    }
+    // Project refresh đã tải collection cascade ALL vẫn phải gỡ thật liên kết, không sống lại lúc flush/commit.
+    @Test void removeUnusedProjectTypeActuallyDeletesAfterProjectRefresh() {
+        var t=new IssueType();t.setTypeName("Unused");t=types.saveAndFlush(t);int id=t.getIssueTypeId();
+        configurationTypes.assignIssueType(project.getProjectId(),id,false);
+        configurationTypes.removeIssueType(project.getProjectId(),id);
+        assertThat(projectTypes.existsById(new ProjectIssueTypeId(project.getProjectId(),id))).isFalse();
+        assertThat(types.existsById(id)).isTrue();
+    }
+    // Giả lập lỗi DB lúc insert sau khi default cũ đã flush false; transaction phải khôi phục cờ cũ.
+    @Test void failedDefaultAssignmentRollsBackClearedFlag() {
+        var a=new IssueType();a.setTypeName("Task");a=types.saveAndFlush(a);var b=new IssueType();b.setTypeName("Rejected");b=types.saveAndFlush(b);
+        int oldId=a.getIssueTypeId(),newId=b.getIssueTypeId(),projectId=project.getProjectId();
+        configurationTypes.assignIssueType(projectId,oldId,true);
+        jdbc.execute("create function regression_reject_assignment() returns trigger language plpgsql as $$ begin if NEW.issue_type_id="+newId+" then raise exception 'test insert failure'; end if; return NEW; end $$");
+        jdbc.execute("create trigger regression_reject_assignment before insert on project_issue_types for each row execute function regression_reject_assignment()");
+        try {
+            assertThatThrownBy(()->configurationTypes.assignIssueType(projectId,newId,true)).isInstanceOf(RuntimeException.class).hasStackTraceContaining("test insert failure");
+            assertThat(jdbc.queryForObject("select is_default from project_issue_types where project_id=? and issue_type_id=?",Boolean.class,projectId,oldId)).isTrue();
+            assertThat(projectTypes.existsById(new ProjectIssueTypeId(projectId,newId))).isFalse();
+        } finally {jdbc.execute("drop trigger regression_reject_assignment on project_issue_types");jdbc.execute("drop function regression_reject_assignment()");}
+    }
+    // Hai yêu cầu mặc định khác nhau chạy đồng thời phải tuần tự qua project lock; cả hai thành công nhưng cuối chỉ một true.
+    @Test void simultaneousDefaultChangesKeepExactlyOneDefault() throws Exception {
+        jdbc.execute(java.nio.file.Files.readString(java.nio.file.Path.of("scripts/migrations/009_configuration_integrity.sql")));
+        var ids=new java.util.ArrayList<Integer>();
+        for(String name:List.of("Task","Bug","Story")){var t=new IssueType();t.setTypeName(name);t=types.saveAndFlush(t);ids.add(t.getIssueTypeId());configurationTypes.assignIssueType(project.getProjectId(),t.getIssueTypeId(),ids.size()==1);}
+        var index=new java.util.concurrent.atomic.AtomicInteger();
+        var results=race(()->{Fixtures.login(caller.getUserId());try{return outcome(()->{configurationTypes.setDefaultIssueType(project.getProjectId(),ids.get(index.incrementAndGet()));return true;});}finally{org.springframework.security.core.context.SecurityContextHolder.clearContext();}});
+        assertThat(results).allMatch(r->r.failure()==null);
+        assertThat(projectTypes.findByProject_ProjectId(project.getProjectId()).stream().filter(ProjectIssueType::isDefault).count()).isEqualTo(1);
+    }
+    // default=true khi gán loại mới tắt cờ cũ; target không tồn tại trả lỗi trước ghi và giữ nguyên default.
+    @Test void assignDefaultAndMissingTargetAreAtomic() {
+        var a=new IssueType();a.setTypeName("Task");a=types.saveAndFlush(a);var b=new IssueType();b.setTypeName("Bug");b=types.saveAndFlush(b);
+        configurationTypes.assignIssueType(project.getProjectId(),a.getIssueTypeId(),true);configurationTypes.assignIssueType(project.getProjectId(),b.getIssueTypeId(),true);
+        int target=b.getIssueTypeId();assertThatThrownBy(()->configurationTypes.setDefaultIssueType(project.getProjectId(),99999)).isInstanceOf(com.example.jira.exception.NotFoundException.class);
+        var links=projectTypes.findByProject_ProjectId(project.getProjectId());assertThat(links.stream().filter(ProjectIssueType::isDefault).map(l->l.getIssueType().getIssueTypeId())).containsExactly(target);
+    }
+    // Hai lượt tạo cùng cạnh chỉ một ghi thành công; unique DB bảo vệ cả khi hai exists cùng đọc false.
+    @Test void simultaneousWorkflowCreationCannotDuplicateEdge() throws Exception {
+        makeAdmin(caller);var a=statuses.saveAndFlush(Fixtures.status(0,"Todo",StatusCategory.TO_DO));var b=statuses.saveAndFlush(Fixtures.status(0,"Doing",StatusCategory.IN_PROGRESS));
+        var request=new com.example.jira.dto.workflow.WorkflowRuleRequest();request.setFromStatusId(a.getStatusId());request.setToStatusId(b.getStatusId());
+        var results=race(()->{Fixtures.login(caller.getUserId());try{return outcome(()->configurationWorkflow.createRule(request));}finally{org.springframework.security.core.context.SecurityContextHolder.clearContext();}});
+        assertThat(results.stream().filter(r->r.failure()==null).count()).isEqualTo(1);assertThat(workflow.count()).isEqualTo(1);
+        Fixtures.login(caller.getUserId());assertThat(configurationWorkflow.getAllRules()).hasSize(1);
+    }
+    // Status nhóm cố định và bulk delete type không cascade cấu hình project; kiểm dữ liệu thật sau lỗi.
+    @Test void immutableCategoryAndTypeReferencesSurviveRejectedWrites() {
+        makeAdmin(caller);var row=statuses.saveAndFlush(Fixtures.status(0,"Done",StatusCategory.DONE));
+        var request=new com.example.jira.dto.issue.issue_status.IssueStatusRequest();request.setStatusName("Reopened");request.setStatusCategory(StatusCategory.TO_DO);
+        assertThatThrownBy(()->configurationStatus.updateStatus(row.getStatusId(),request)).isInstanceOf(com.example.jira.exception.ConflictException.class);
+        assertThat(statuses.findById(row.getStatusId()).orElseThrow().getStatusCategory()).isEqualTo(StatusCategory.DONE);
+        var t=new IssueType();t.setTypeName("Task");t=types.saveAndFlush(t);configurationTypes.assignIssueType(project.getProjectId(),t.getIssueTypeId(),false);int id=t.getIssueTypeId();
+        assertThatThrownBy(()->configurationCatalog.deleteIssueType(id)).isInstanceOf(com.example.jira.exception.ConflictException.class);
+        assertThat(projectTypes.count()).isEqualTo(1);assertThat(types.existsById(id)).isTrue();
+    }
+
     // Các helper chỉ tạo fixture đã commit trong DB test; không thay thuật toán production.
     private Sprint persistedSprint(SprintState state) {
         var sprint = new Sprint(); sprint.setProject(project); sprint.setState(state); return sprints.saveAndFlush(sprint);

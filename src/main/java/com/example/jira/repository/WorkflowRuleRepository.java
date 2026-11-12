@@ -7,4 +7,5 @@ import java.util.List;
 public interface WorkflowRuleRepository extends JpaRepository<WorkflowRule, Integer> {
     boolean existsByFromStatus_StatusIdAndToStatus_StatusId(int fromStatusId, int toStatusId);
     List<WorkflowRule> findByFromStatus_StatusId(int fromStatusId);
+    boolean existsByFromStatus_StatusIdOrToStatus_StatusId(int from,int to);
 }
