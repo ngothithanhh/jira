@@ -1,6 +1,7 @@
 package com.example.jira.mapper;
 
 import com.example.jira.dto.board.BoardResponse;
+import com.example.jira.dto.board.ColumnOrderToken;
 import com.example.jira.entity.Board;
 import com.example.jira.entity.BoardColumn;
 
@@ -20,6 +21,7 @@ public class BoardMapper {
         dto.setBoardName(board.getBoardName());
         dto.setBoardType(board.getBoardType());
         dto.setCreatedAt(board.getCreatedAt());
+        dto.setColumnOrderToken(ColumnOrderToken.of(board.getBoardId(), columns == null ? List.of() : columns));
 
         List<BoardResponse.BoardColumnDto> colDtos = new ArrayList<>();
         if (columns != null) {

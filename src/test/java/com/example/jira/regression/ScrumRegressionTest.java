@@ -137,7 +137,11 @@ class ScrumRegressionTest {
     class Boards {
         @Mock jakarta.persistence.EntityManager entityManager;
         @BeforeEach void projectLock() {
+            Fixtures.login(1);
             lenient().when(projects.findByIdForUpdate(10)).thenReturn(Optional.of(Fixtures.project(10)));
+        }
+        @AfterEach void clearActor() {
+            org.springframework.security.core.context.SecurityContextHolder.clearContext();
         }
         @Mock BoardRepository boards;
         @Mock ProjectRepository projects;
@@ -184,19 +188,25 @@ class ScrumRegressionTest {
         @Test void reorderRejectsForeignColumn() {
             when(boards.findById(50)).thenReturn(Optional.of(board()));
             when(security.hasPermission(10, PermissionName.MANAGE_BOARD)).thenReturn(true);
-            var other = board(); other.setBoardId(51);
-            when(columns.findById(61)).thenReturn(Optional.of(column(other, 61)));
-            var r = new UpdateColumnOrderRequest(); r.setColumnId(61); r.setPosition(2);
-            assertThatThrownBy(() -> service.updateColumnOrder(50, List.of(r))).hasMessageContaining("không thuộc");
-            verify(columns, never()).save(any());
+            var current = List.of(column(board(), 60));
+            when(columns.findByBoard_BoardIdOrderByPositionAsc(50)).thenReturn(current);
+            var r = new UpdateColumnOrderRequest(61, 0);
+            assertThatThrownBy(() -> service.updateColumnOrder(50, ColumnOrderToken.of(50, current), List.of(r)))
+                    .hasMessageContaining("toàn bộ cột");
+            verify(columns, never()).updatePosition(anyInt(), anyInt(), anyInt());
         }
         // Reorder đúng cập nhật vị trí cột và không sửa board khác.
         @Test void reorderUpdatesRequestedColumn() {
             var b = board(); var c = column(b, 60);
-            when(boards.findById(50)).thenReturn(Optional.of(b)); when(columns.findById(60)).thenReturn(Optional.of(c));
+            c.setPosition(1);
+            when(boards.findById(50)).thenReturn(Optional.of(b));
+            when(columns.findByBoard_BoardIdOrderByPositionAsc(50)).thenReturn(List.of(c));
             when(security.hasPermission(10, PermissionName.MANAGE_BOARD)).thenReturn(true);
-            var r = new UpdateColumnOrderRequest(); r.setColumnId(60); r.setPosition(3);
-            service.updateColumnOrder(50, List.of(r)); assertThat(c.getPosition()).isEqualTo(3); verify(columns).save(c);
+            when(columns.updatePosition(50, 60, 0)).thenReturn(1);
+            var r = new UpdateColumnOrderRequest(60, 0);
+            service.updateColumnOrder(50, ColumnOrderToken.of(50, List.of(c)), List.of(r));
+            verify(columns).updatePosition(50, 60, 0);
+            verify(columns, never()).save(any());
         }
         @Test void legacyReorderReturningToOriginalPositionDoesNotAudit() {
             var b = board(); var c = column(b, 60); c.setPosition(1);

@@ -7,7 +7,9 @@ import com.example.jira.enums.*;
 import com.example.jira.mapper.SprintMapper;
 import com.example.jira.repository.*;
 import com.example.jira.security.ProjectSecurity;
+import com.example.jira.ultils.SecurityUtils;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -38,6 +40,9 @@ public class ContainerManagementService {
     public SprintResponse updateSprint(int sprintId,UpdateSprintRequest request) {
         if (request == null) throw error(HttpStatus.BAD_REQUEST,"Thiếu nội dung cập nhật");
         if (request.getSprintName() != null) name(request.getSprintName());
+        if (request.getGoal() != null && request.getGoal().length() > 255) {
+            throw error(HttpStatus.BAD_REQUEST, "Mục tiêu sprint tối đa 255 ký tự");
+        }
         Sprint sprint = lockedSprint(sprintId);
         if (sprint.getState() != SprintState.FUTURE && sprint.getState() != SprintState.ACTIVE) throw error(HttpStatus.CONFLICT,"Không sửa sprint đã đóng");
         if (sprint.getState() == SprintState.ACTIVE && (request.getStartDate() != null || request.getEndDate() != null)) throw error(HttpStatus.CONFLICT,"Không đổi ngày của sprint đã bắt đầu");
@@ -134,10 +139,23 @@ public class ContainerManagementService {
         audit.logProjectAction("DELETE_COLUMN",EntityType.BOARD,column.getBoard().getBoardId(),column.getBoard().getProject().getProjectId(),"Xóa cột ID "+columnId);
     }
 
-    /** Tra sprint để lấy project, kiểm quyền trước khóa; refresh sau khóa để không dùng state cũ lúc chờ. */
+    /** Kiểm quyền trước và sau khóa project để dùng membership và trạng thái đã commit trong lúc chờ. */
     private Sprint lockedSprint(int id) {
         Sprint sprint = sprints.findById(id).orElseThrow(() -> error(HttpStatus.NOT_FOUND,"Không tìm thấy sprint"));
-        lock(sprint.getProject().getProjectId(),PermissionName.MANAGE_SPRINT); entityManager.refresh(sprint); return sprint;
+        int projectId = sprint.getProject().getProjectId();
+        Project project = lock(projectId, PermissionName.MANAGE_SPRINT);
+        entityManager.refresh(project);
+        ProjectMember member = entityManager.find(ProjectMember.class, new ProjectMemberId(projectId, SecurityUtils.getCurrentUserId()));
+        if (member != null) {
+            try {
+                entityManager.refresh(member);
+            } catch (EntityNotFoundException removed) {
+                throw error(HttpStatus.FORBIDDEN, "Bạn không còn là thành viên dự án");
+            }
+        }
+        security.requirePermission(projectId, PermissionName.MANAGE_SPRINT);
+        entityManager.refresh(sprint);
+        return sprint;
     }
     /** Tra board để kiểm MANAGE_BOARD đúng project, khóa rồi refresh trước sửa/xóa. */
     private Board lockedBoard(int id) {
@@ -150,9 +168,9 @@ public class ContainerManagementService {
         lock(column.getBoard().getProject().getProjectId(),PermissionName.MANAGE_BOARD); entityManager.refresh(column); return column;
     }
     /** Dùng chung khóa projects với move/status/backlog; thiếu quyền trả 403 trước lấy khóa, thiếu project trả 404. */
-    private void lock(int projectId,PermissionName permission) {
+    private Project lock(int projectId,PermissionName permission) {
         security.requirePermission(projectId,permission);
-        projects.findByIdForUpdate(projectId).orElseThrow(() -> error(HttpStatus.NOT_FOUND,"Không tìm thấy dự án"));
+        return projects.findByIdForUpdate(projectId).orElseThrow(() -> error(HttpStatus.NOT_FOUND,"Không tìm thấy dự án"));
     }
     /** Tên từ request không được blank/quá độ dài cột DB; chưa ghi dữ liệu. */
     private void name(String value) { if (value == null || value.isBlank() || value.length() > 100) throw error(HttpStatus.BAD_REQUEST,"Tên phải có 1..100 ký tự"); }
