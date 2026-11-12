@@ -38,7 +38,11 @@ public class GlobalSecurity {
      * Chỉ đọc user_role_assignments/user_roles; không ghi DB và không cấp thêm role.
      */
     public boolean isSystemAdmin() {
-        return userRoleAssignmentRepository.findByUser_UserId(currentUserId()).stream()
+        return isSystemAdmin(currentUserId());
+    }
+
+    boolean isSystemAdmin(int userId) {
+        return userRoleAssignmentRepository.findByUser_UserId(userId).stream()
                 .anyMatch(assignment -> assignment.getRole() != null
                         && "SYSTEM_ADMIN".equalsIgnoreCase(assignment.getRole().getRoleName()));
     }
