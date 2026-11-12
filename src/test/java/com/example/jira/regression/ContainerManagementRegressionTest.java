@@ -34,11 +34,32 @@ class ContainerManagementRegressionTest {
     @InjectMocks ContainerManagementService service;
     Sprint sprint; Board board; BoardColumn column;
     @BeforeEach void scope() {
+        Fixtures.login(1);
         sprint = Fixtures.sprint(100,10,SprintState.FUTURE);
         board = new Board(); board.setBoardId(50); board.setProject(Fixtures.project(10)); board.setBoardName("Team");
         column = new BoardColumn(); column.setColumnId(60); column.setBoard(board); column.setColumnName("Doing"); column.setWipLimit(3);
         lenient().when(sprints.findById(100)).thenReturn(Optional.of(sprint)); lenient().when(boards.findById(50)).thenReturn(Optional.of(board));
         lenient().when(columns.findById(60)).thenReturn(Optional.of(column)); lenient().when(projects.findByIdForUpdate(10)).thenReturn(Optional.of(board.getProject()));
+    }
+    @AfterEach void clearActor() {
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+    }
+
+    @Test void revokedSprintPermissionIsCheckedAfterLockAndBeforeWriting() {
+        var member = new ProjectMember();
+        when(entityManager.find(ProjectMember.class, new ProjectMemberId(10, 1))).thenReturn(member);
+        doNothing().doThrow(new org.springframework.security.access.AccessDeniedException("revoked"))
+                .when(security).requirePermission(10, PermissionName.MANAGE_SPRINT);
+
+        assertThatThrownBy(() -> service.deleteSprint(100)).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        InOrder order = inOrder(security, projects, entityManager);
+        order.verify(security).requirePermission(10, PermissionName.MANAGE_SPRINT);
+        order.verify(projects).findByIdForUpdate(10);
+        order.verify(entityManager).refresh(member);
+        order.verify(security).requirePermission(10, PermissionName.MANAGE_SPRINT);
+        verify(entityManager, never()).refresh(sprint);
+        verifyNoInteractions(links);
+        verify(sprints, never()).delete(any());
     }
     @Test void missingContainersAreNotFound() {
         fails(() -> service.deleteSprint(999),HttpStatus.NOT_FOUND); fails(() -> service.deleteBoard(999),HttpStatus.NOT_FOUND); fails(() -> service.deleteColumn(999),HttpStatus.NOT_FOUND);
@@ -63,7 +84,10 @@ class ContainerManagementRegressionTest {
         verify(sprints,times(1)).save(sprint);
     }
     @Test void closedStateIsRefreshedBeforeUpdateOrDelete() {
-        doAnswer(call -> { sprint.setState(SprintState.CLOSED); return null; }).when(entityManager).refresh(sprint);
+        doAnswer(call -> {
+            if (call.getArgument(0) == sprint) sprint.setState(SprintState.CLOSED);
+            return null;
+        }).when(entityManager).refresh(any());
         fails(() -> service.updateSprint(100,new UpdateSprintRequest()),HttpStatus.CONFLICT);
         fails(() -> service.deleteSprint(100),HttpStatus.CONFLICT); verifyNoInteractions(links); verify(sprints,never()).delete(any(Sprint.class));
     }
