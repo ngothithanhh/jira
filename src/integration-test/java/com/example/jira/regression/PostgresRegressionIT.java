@@ -90,7 +90,7 @@ class PostgresRegressionIT {
             SprintMetricsService.class, ScrumReportService.class, AccountManagementService.class,
             ProjectMemberServiceImpl.class, UserRoleServiceImpl.class, com.example.jira.security.GlobalSecurity.class,
             com.example.jira.security.CustomUserDetailsService.class, IssueCommentServiceImpl.class,
-            NotificationInboxService.class, AdminQueryService.class, DatabaseSeeder.class, IssueAttachmentServiceImpl.class,ProjectIssueTypeServiceImpl.class,WorkflowRuleServiceImpl.class,IssueStatusServiceImpl.class,IssueTypeServiceImpl.class})
+            NotificationInboxService.class, AdminQueryService.class, DatabaseSeeder.class, IssueAttachmentServiceImpl.class,ProjectIssueTypeServiceImpl.class,WorkflowRuleServiceImpl.class,IssueStatusServiceImpl.class,IssueTypeServiceImpl.class,AdminUserQueryService.class})
     static class Config {
         // Cleanup container chạy khi context đóng; local cluster do script dừng sau khi Maven kết thúc.
         @Bean org.springframework.beans.factory.DisposableBean postgresCleanup() {
@@ -162,6 +162,7 @@ class PostgresRegressionIT {
     @Autowired WorkflowRuleServiceImpl configurationWorkflow;
     @Autowired IssueStatusServiceImpl configurationStatus;
     @Autowired IssueTypeServiceImpl configurationCatalog;
+    @Autowired AdminUserQueryService adminDirectory;
     User caller;
     Project project;
 
@@ -1059,6 +1060,41 @@ class PostgresRegressionIT {
         var t=new IssueType();t.setTypeName("Task");t=types.saveAndFlush(t);configurationTypes.assignIssueType(project.getProjectId(),t.getIssueTypeId(),false);int id=t.getIssueTypeId();
         assertThatThrownBy(()->configurationCatalog.deleteIssueType(id)).isInstanceOf(com.example.jira.exception.ConflictException.class);
         assertThat(projectTypes.count()).isEqualTo(1);assertThat(types.existsById(id)).isTrue();
+    }
+
+
+    // Query thật phân trang users trước batch role/count; ký tự wildcard là nội dung cần tìm.
+    @Test void adminUserPagesKeepGlobalRolesMembershipsAndLiteralSearchSeparate() {
+        makeAdmin(caller);
+        var a=Fixtures.user(0);a.setUserName("Alpha_% person");a.setEmail("alpha@test.invalid");a=users.saveAndFlush(a);
+        var b=Fixtures.user(0);b.setUserName("ALPHA ordinary");b.setEmail("ordinary@test.invalid");b.setEnabled(false);b=users.saveAndFlush(b);
+        var role=roleRows.saveAndFlush(Fixtures.role(0,"DEVELOPER"));makeAdmin(a);
+        var assignment=new UserRoleAssignment();assignment.setId(new UserRoleAssignmentId(a.getUserId(),role.getRoleId()));assignment.setUser(a);assignment.setRole(role);roleAssignments.saveAndFlush(assignment);
+        var member=new ProjectMember();member.setId(new ProjectMemberId(project.getProjectId(),a.getUserId()));member.setProject(project);member.setUser(a);member.setRole(role);members.saveAndFlush(member);
+        var filter=new com.example.jira.dto.admin.AdminUserSearch();filter.setKeyword("alpha");filter.setSize(1);
+        var page=adminDirectory.search(filter);assertThat(page.totalItems()).isEqualTo(2);assertThat(page.items()).hasSize(1);assertThat(page.totalPages()).isEqualTo(2);
+        filter.setEnabled(true);var enabled=adminDirectory.search(filter);assertThat(enabled.totalItems()).isEqualTo(1);
+        var row=enabled.items().get(0);assertThat(row.roles()).hasSize(2);assertThat(row.projectMembershipCount()).isEqualTo(1);assertThat(row.userId()).isEqualTo(a.getUserId());
+        filter.setEnabled(null);filter.setKeyword("_%");assertThat(adminDirectory.search(filter).totalItems()).isEqualTo(1);
+        assertThat(adminDirectory.get(a.getUserId()).roles()).hasSize(2);
+    }
+    // Không admin dừng trước dữ liệu target; quyền role tại project không tạo quyền quản trị toàn hệ thống.
+    @Test void adminDirectoryRequiresGlobalAdmin() {
+        assertThatThrownBy(()->adminDirectory.search(new com.example.jira.dto.admin.AdminUserSearch())).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        assertThatThrownBy(()->adminDirectory.get(caller.getUserId())).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+    }
+    // FETCH graph bỏ collection EAGER; số query cố định khi một trang tăng từ3 lên12 user có assignment.
+    @Test void adminDirectoryDoesNotLoadEagerRolesPerUserInPage() {
+        makeAdmin(caller);var role=roleRows.findByRoleName("SYSTEM_ADMIN").orElseThrow();
+        for(int n=0;n<12;n++){var u=Fixtures.user(0);u.setEmail("batch"+n+"@test.invalid");u.setUserName("batch"+n);u=users.saveAndFlush(u);
+            var link=new UserRoleAssignment();link.setId(new UserRoleAssignmentId(u.getUserId(),role.getRoleId()));link.setUser(u);link.setRole(role);roleAssignments.saveAndFlush(link);}
+        var statistics=em.getEntityManagerFactory().unwrap(org.hibernate.SessionFactory.class).getStatistics();boolean previous=statistics.isStatisticsEnabled();
+        statistics.setStatisticsEnabled(true);
+        try {
+            var filter=new com.example.jira.dto.admin.AdminUserSearch();filter.setSize(3);statistics.clear();adminDirectory.search(filter);long small=statistics.getPrepareStatementCount();
+            filter.setSize(12);statistics.clear();adminDirectory.search(filter);long large=statistics.getPrepareStatementCount();
+            assertThat(large).isLessThanOrEqualTo(small+1);
+        } finally {statistics.setStatisticsEnabled(previous);}
     }
 
     // Các helper chỉ tạo fixture đã commit trong DB test; không thay thuật toán production.

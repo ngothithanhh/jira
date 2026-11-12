@@ -205,6 +205,12 @@ class ProjectRegressionTest {
         @Mock PasswordConfig passwords;
         @Mock GlobalSecurity global;
         @InjectMocks UserServiceImpl service;
+        // Endpoint legacy không được đi vòng quyền của trang admin mới.
+        @Test void ordinaryUserCannotReadLegacyUserDirectory() {
+            doThrow(new org.springframework.security.access.AccessDeniedException("Forbidden")).when(global).assertSystemAdmin();
+            assertThatThrownBy(()->service.getAllUsers()).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+            verifyNoInteractions(repository);
+        }
         // Danh sách user không trả mật khẩu, kiểm tra dữ liệu DTO thay vì entity thô.
         @Test void listMapsPublicUserData() {
             when(repository.findAll()).thenReturn(List.of(Fixtures.user(2)));

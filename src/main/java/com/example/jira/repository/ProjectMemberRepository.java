@@ -8,6 +8,9 @@ import java.util.List;
 import java.util.Optional;
 
 public interface ProjectMemberRepository extends JpaRepository<ProjectMember, ProjectMemberId> {
+    /** Chỉ đếm membership đã gán cho các user trong trang; không coi lead chưa có membership là một thành viên. */
+    @org.springframework.data.jpa.repository.Query("select m.user.userId, count(m) from ProjectMember m where m.user.userId in :ids group by m.user.userId")
+    List<Object[]> adminMembershipCounts(@org.springframework.data.repository.query.Param("ids") java.util.Collection<Integer> ids);
     @org.springframework.data.jpa.repository.Query("select count(m) from ProjectMember m where m.project.projectId = :projectId and upper(m.role.roleName) = 'PROJECT_MANAGER' and m.user.userId <> :excludedUserId")
     long countOtherProjectManagers(@org.springframework.data.repository.query.Param("projectId") int projectId,
             @org.springframework.data.repository.query.Param("excludedUserId") int excludedUserId);

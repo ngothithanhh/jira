@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.*;
         IssueCommentController.class, IssueAttachmentController.class, IssueTypeController.class,
         IssueStatusController.class, UserRoleController.class, PermissionController.class,
         RolePermissionController.class, WorkflowController.class, BoardController.class,
-        SprintController.class, NotificationController.class, BacklogController.class, BoardCardController.class, IssueQueryController.class, ContainerManagementController.class, ScrumReportController.class, AccountManagementController.class, NotificationInboxController.class, AdminQueryController.class}, properties = {
+        SprintController.class, NotificationController.class, BacklogController.class, BoardCardController.class, IssueQueryController.class, ContainerManagementController.class, ScrumReportController.class, AccountManagementController.class, NotificationInboxController.class, AdminQueryController.class,AdminUserController.class}, properties = {
         "app.jwt.secret=" + SecurityRegressionTest.SECRET, "app.jwt.expiration=60000"})
 @Import({SecurityConfig.class, JwtUtil.class, CorsConfig.class})
 class ApiRegressionTest {
@@ -66,6 +66,18 @@ class ApiRegressionTest {
     @MockBean com.example.jira.service.impl.AccountManagementService accounts;
     @MockBean com.example.jira.service.impl.NotificationInboxService inbox;
     @MockBean com.example.jira.service.impl.AdminQueryService adminQueries;
+    @MockBean com.example.jira.service.impl.AdminUserQueryService adminUsers;
+
+    /** ModelAttribute kiểm filter HTTP trước service; detail giữ nguyên target ID của request. */
+    @Test void adminUserReadRoutesValidateFilters() throws Exception {
+        mvc.perform(get("/api/admin/users?keyword=alice&enabled=false&page=2&size=10").header("Authorization",bearer())).andExpect(status().isOk());
+        verify(adminUsers).search(argThat(r->r.getKeyword().equals("alice")&&Boolean.FALSE.equals(r.getEnabled())&&r.getPage()==2&&r.getSize()==10));
+        mvc.perform(get("/api/admin/users/8").header("Authorization",bearer())).andExpect(status().isOk());verify(adminUsers).get(8);
+        clearInvocations(adminUsers);
+        for(String query:java.util.List.of("size=0","size=101","page=-1","enabled=wrong","keyword="+"a".repeat(101)))
+            mvc.perform(get("/api/admin/users?"+query).header("Authorization",bearer())).andExpect(status().isBadRequest());
+        verifyNoInteractions(adminUsers);
+    }
 
     @Test void collaborationAndAdminRoutesPreserveOwnershipScopeAndVersion() throws Exception {
         mvc.perform(put("/api/issues/5/comments/7").header("Authorization",bearer()).contentType(MediaType.APPLICATION_JSON).content("{\"commentText\":\"Changed\",\"expectedVersion\":3}")).andExpect(status().isOk());

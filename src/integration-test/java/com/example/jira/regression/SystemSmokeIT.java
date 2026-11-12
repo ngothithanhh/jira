@@ -94,6 +94,10 @@ class SystemSmokeIT {
         assertThat(call("GET","/api/admin/overview",token,null,200).path("issues").asInt()).isEqualTo(1);
         JsonNode regular=call("POST","/api/auth/register",null,Map.of("email","smoke-user@test.invalid","password","smoke-password","userName","smoke-user","fullName","User"),200);
         String regularToken=regular.path("token").asText();
+        call("GET","/api/admin/users",regularToken,null,403);call("GET","/api/user",regularToken,null,403);
+        call("GET","/api/admin/users/"+admin.getUserId(),regularToken,null,403);
+        JsonNode directory=call("GET","/api/admin/users?keyword=smoke&size=1",token,null,200);assertThat(directory.path("totalItems").asInt()).isEqualTo(2);assertThat(directory.path("items").size()).isEqualTo(1);
+        JsonNode adminDetail=call("GET","/api/admin/users/"+admin.getUserId(),token,null,200);assertThat(adminDetail.has("passwordHash")).isFalse();assertThat(adminDetail.path("roles").get(0).path("roleName").asText()).isEqualTo("SYSTEM_ADMIN");
         call("GET","/api/admin/overview",regularToken,null,403); call("GET","/api/issues/"+issueId,regularToken,null,403);
         int regularId=users.findByEmail("smoke-user@test.invalid").orElseThrow().getUserId();
         int developerId=roles.findByRoleName("DEVELOPER").orElseThrow().getRoleId();

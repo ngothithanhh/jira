@@ -10,7 +10,11 @@ import org.springframework.stereotype.Repository;
 import java.util.Optional;
 
 @Repository
-public interface UserRepository extends JpaRepository<User, Integer> {
+public interface UserRepository extends JpaRepository<User, Integer>, org.springframework.data.jpa.repository.JpaSpecificationExecutor<User> {
+    /** Trang admin chỉ cần trường cơ bản; FETCH graph bỏ collection EAGER để batch roles không còn N+1 theo user. */
+    @Override
+    @org.springframework.data.jpa.repository.EntityGraph(type=org.springframework.data.jpa.repository.EntityGraph.EntityGraphType.FETCH,attributePaths={"userName","fullName","email","enabled","createdAt"})
+    org.springframework.data.domain.Page<User> findAll(org.springframework.data.jpa.domain.Specification<User> filter,org.springframework.data.domain.Pageable page);
     long countByEnabledTrue();
     @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
     @org.springframework.data.jpa.repository.Query("select u from User u where u.userId = :id")

@@ -32,6 +32,8 @@ public class UserServiceImpl implements UserService {
     }
     @Override
     public List<UserResponse> getAllUsers(){
+        // Danh sách email/tài khoản toàn hệ thống chỉ dành cho admin; thêm member dùng candidate API theo project.
+        globalSecurity.assertSystemAdmin();
         return userRepository.findAll()
                 .stream()
                 .map(UserMapper::toResponseFull)
