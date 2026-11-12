@@ -31,6 +31,8 @@ class BoardCardRegressionTest {
     @Mock IssueService issueService;
     @Mock BoardWipPolicy wip;
     @Mock EntityManager entityManager;
+    @Mock SprintRepository sprints;
+    @Mock SprintIssueRepository sprintIssues;
     @InjectMocks BoardCardService service;
     Board board; BoardColumn column; Issue issue;
     @BeforeEach void scope() {
@@ -71,6 +73,49 @@ class BoardCardRegressionTest {
         fails(() -> service.move(50,5,body),HttpStatus.CONFLICT);
         verifyNoInteractions(mappings,ranks,issueService);
         var sequence = inOrder(projects,entityManager); sequence.verify(projects).findByIdForUpdate(10); sequence.verify(entityManager).refresh(issue);
+    }
+    /** Guard sprint phải dừng trước workflow/rank, kể cả version issue vẫn hợp lệ sau completion/gỡ link. */
+    @Test void missingSprintStopsBeforeWrite() {
+        var body=request(); body.setSprintId(70);
+        fails(() -> service.move(50,5,body),HttpStatus.NOT_FOUND);
+        verifyNoInteractions(mappings,ranks,issueService);
+    }
+    @Test void foreignSprintStopsBeforeWrite() {
+        Sprint sprint=sprint(SprintState.ACTIVE); sprint.setProject(Fixtures.project(20));
+        when(sprints.findById(70)).thenReturn(Optional.of(sprint));
+        var body=request(); body.setSprintId(70);
+        fails(() -> service.move(50,5,body),HttpStatus.BAD_REQUEST);
+        verifyNoInteractions(sprintIssues,mappings,ranks,issueService);
+    }
+    @Test void closedOrFutureSprintStopsBeforeWrite() {
+        for (SprintState state:List.of(SprintState.FUTURE,SprintState.CLOSED)) {
+            when(sprints.findById(70)).thenReturn(Optional.of(sprint(state)));
+            var body=request(); body.setSprintId(70);
+            fails(() -> service.move(50,5,body),HttpStatus.CONFLICT);
+        }
+        verifyNoInteractions(sprintIssues,mappings,ranks,issueService);
+    }
+    @Test void removedIssueStopsBeforeWrite() {
+        when(sprints.findById(70)).thenReturn(Optional.of(sprint(SprintState.ACTIVE)));
+        var body=request(); body.setSprintId(70);
+        fails(() -> service.move(50,5,body),HttpStatus.CONFLICT);
+        verify(sprintIssues).existsById(new SprintIssueId(70,5));
+        verifyNoInteractions(mappings,ranks,issueService);
+    }
+    @Test void activeLinkedSprintContinuesToColumnValidationUnderProjectLock() {
+        Sprint sprint=sprint(SprintState.ACTIVE);
+        when(sprints.findById(70)).thenReturn(Optional.of(sprint));
+        when(sprintIssues.existsById(new SprintIssueId(70,5))).thenReturn(true);
+        var body=request(); body.setSprintId(70);
+        fails(() -> service.move(50,5,body),HttpStatus.BAD_REQUEST);
+        var sequence=inOrder(projects,entityManager,sprints,sprintIssues,columns);
+        sequence.verify(projects).findByIdForUpdate(10); sequence.verify(entityManager).refresh(issue);
+        sequence.verify(sprints).findById(70); sequence.verify(entityManager).refresh(sprint);
+        sequence.verify(sprintIssues).existsById(new SprintIssueId(70,5)); sequence.verify(columns).findById(60);
+        verifyNoInteractions(issueService,ranks);
+    }
+    private Sprint sprint(SprintState state) {
+        Sprint sprint=new Sprint(); sprint.setSprintId(70); sprint.setProject(board.getProject()); sprint.setState(state); return sprint;
     }
     @Test void crossProjectIssueDoesNotLock() {
         issue.setProject(Fixtures.project(20)); fails(() -> service.move(50,5,request()),HttpStatus.BAD_REQUEST);

@@ -430,6 +430,60 @@ class PostgresRegressionIT {
                 .isInstanceOf(com.example.jira.exception.ConflictException.class);
         assertThat(boardMappings.findBoardMappings(fixture.board().getBoardId())).hasSize(1);
     }
+    /**
+     * Hai transaction tranh cùng khóa project: move đứng trước được commit rồi close/remove chạy tiếp;
+     * close/remove đứng trước thì move phải đọc lại sprint/link và trả409, dù version issue chưa đổi.
+     * Latch chỉ giữ sau truy vấn khóa thật, không thay kết quả DB hoặc mock việc ghi.
+     */
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,false","false,true","true,false","true,true"})
+    void sprintMoveIsSerializedWithClosureAndRemoval(boolean complete,boolean moveFirst) throws Exception {
+        var fixture=moveFixture(0); var sprint=persistedSprint(SprintState.ACTIVE); saveLink(sprint,fixture.issue());
+        int sprintId=sprint.getSprintId(), issueId=fixture.issue().getIssueId(), actorId=caller.getUserId();
+        var locked=new CountDownLatch(1); var release=new CountDownLatch(1); var secondAtLock=new CountDownLatch(1);
+        var firstRepo=new ProxyFactory(); firstRepo.setInterfaces(ProjectRepository.class); firstRepo.setTarget(projects);
+        firstRepo.addAdvice((MethodInterceptor) invocation -> {
+            Object result=invocation.proceed();
+            if(invocation.getMethod().getName().equals("findByIdForUpdate")) {
+                locked.countDown(); if(!release.await(10,TimeUnit.SECONDS))throw new IllegalStateException("project lock release timeout");
+            }
+            return result;
+        });
+        var secondRepo=new ProxyFactory(); secondRepo.setInterfaces(ProjectRepository.class); secondRepo.setTarget(projects);
+        secondRepo.addAdvice((MethodInterceptor) invocation -> {
+            if(invocation.getMethod().getName().equals("findByIdForUpdate"))secondAtLock.countDown();
+            return invocation.proceed();
+        });
+        Object moveTarget=AopTestUtils.getUltimateTargetObject(boardCardService), sprintTarget=AopTestUtils.getUltimateTargetObject(sprintService);
+        ReflectionTestUtils.setField(moveTarget,"projects",moveFirst?firstRepo.getProxy():secondRepo.getProxy());
+        ReflectionTestUtils.setField(sprintTarget,"projectRepository",moveFirst?secondRepo.getProxy():firstRepo.getProxy());
+        Supplier<Outcome> move=()->{
+            Fixtures.login(actorId);
+            try{return outcome(()->{var body=moveRequest(fixture,fixture.issue());body.setSprintId(sprintId);return boardCardService.move(fixture.board().getBoardId(),issueId,body);});}
+            finally{org.springframework.security.core.context.SecurityContextHolder.clearContext();}
+        };
+        Supplier<Outcome> mutation=()->{
+            Fixtures.login(actorId);
+            try{return outcome(()->{if(complete)sprintService.completeSprint(sprintId,null);else sprintService.removeIssueFromSprint(sprintId,issueId);return true;});}
+            finally{org.springframework.security.core.context.SecurityContextHolder.clearContext();}
+        };
+        var pool=Executors.newFixedThreadPool(2);
+        try{
+            var first=pool.submit((moveFirst?move:mutation)::get); assertThat(locked.await(10,TimeUnit.SECONDS)).isTrue();
+            var second=pool.submit((moveFirst?mutation:move)::get); assertThat(secondAtLock.await(10,TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(()->second.get(200,TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
+            release.countDown(); assertThat(first.get(10,TimeUnit.SECONDS).failure()).isNull(); var last=second.get(10,TimeUnit.SECONDS);
+            if(moveFirst)assertThat(last.failure()).isNull();
+            else assertThat(last.failure()).isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException.class,e->assertThat(e.getStatusCode().value()).isEqualTo(409));
+            assertThat(backlog.existsById(new SprintIssueId(sprintId,issueId))).isFalse();
+            assertThat(boardRanks.count()).isEqualTo(moveFirst?1:0);
+            assertThat(jdbc.queryForObject("select count(*) from issue_transitions",Integer.class)).isEqualTo(moveFirst?1:0);
+        }finally{
+            release.countDown();pool.shutdownNow();pool.awaitTermination(10,TimeUnit.SECONDS);
+            ReflectionTestUtils.setField(moveTarget,"projects",projects);ReflectionTestUtils.setField(sprintTarget,"projectRepository",projects);
+        }
+    }
+
     private void assertOneSuccessAndConflict(List<Outcome> results) {
         assertThat(results.stream().filter(result -> result.failure() == null)).hasSize(1);
         assertThat(results.stream().filter(result -> result.failure() != null).toList()).singleElement().satisfies(result ->

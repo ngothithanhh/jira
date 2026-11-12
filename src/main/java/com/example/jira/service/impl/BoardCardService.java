@@ -3,6 +3,7 @@ package com.example.jira.service.impl;
 import com.example.jira.dto.board.*;
 import com.example.jira.entity.*;
 import com.example.jira.enums.PermissionName;
+import com.example.jira.enums.SprintState;
 import com.example.jira.mapper.IssueMapper;
 import com.example.jira.repository.*;
 import com.example.jira.security.ProjectSecurity;
@@ -29,6 +30,8 @@ public class BoardCardService {
     private final IssueService issueService;
     private final BoardWipPolicy wip;
     private final EntityManager entityManager;
+    private final SprintRepository sprints;
+    private final SprintIssueRepository sprintIssues;
 
     /**
      * Đọc card của toàn project sở hữu boardId sau VIEW_PROJECT; không ghi DB.
@@ -72,6 +75,8 @@ public class BoardCardService {
         entityManager.refresh(issue);
         // Chặn snapshot cũ ngay sau khóa; chưa ghi status, lịch sử hoặc rank.
         if (!Objects.equals(issue.getVersion(),request.getExpectedVersion())) throw error(HttpStatus.CONFLICT,"Issue đã thay đổi, vui lòng tải lại board");
+        // Khóa project đã được giữ: đóng sprint/gỡ issue phải xong trước hoặc chờ move này commit.
+        validateSprintMoveScope(projectId,issueId,request.getSprintId());
         BoardColumn target = columns.findById(request.getColumnId()).orElseThrow(() -> error(HttpStatus.NOT_FOUND,"Không tìm thấy cột"));
         if (target.getBoard().getBoardId() != boardId) throw error(HttpStatus.BAD_REQUEST,"Cột không thuộc board");
         Map<Integer,BoardColumn> byStatus = mapping(boardId);
@@ -103,6 +108,24 @@ public class BoardCardService {
         issue.setUpdatedAt(issue.getUpdatedAt() != null && !now.isAfter(issue.getUpdatedAt().plusNanos(1000)) ? issue.getUpdatedAt().plusNanos(1000) : now);
         issues.save(issue); entityManager.flush();
         return new BoardCardResponse(IssueMapper.toResponse(issue),target.getColumnId(),request.getPosition(),issue.getVersion());
+    }
+
+    /**
+     * Dùng sau khóa project và kiểm version, trước mọi ghi status/rank.
+     * sprintId là ID sprints do màn Scrum đang chọn; cặp sprintId/issueId phải còn trong sprint_issues.
+     * Đọc lại sprint sau khóa vì lúc chờ có thể đã CLOSED hoặc đã gỡ issue. Sai phạm vi trả lỗi, không tự thêm lại.
+     * Client cũ không gửi sprintId vẫn dùng hợp đồng board toàn project; hàm này chỉ đọc DB.
+     */
+    private void validateSprintMoveScope(int projectId,int issueId,Integer sprintId) {
+        if (sprintId == null) return;
+        Sprint sprint = sprints.findById(sprintId).orElseThrow(() -> error(HttpStatus.NOT_FOUND,"Không tìm thấy sprint"));
+        entityManager.refresh(sprint);
+        if (sprint.getProject() == null || sprint.getProject().getProjectId() != projectId)
+            throw error(HttpStatus.BAD_REQUEST,"Sprint không thuộc project của board");
+        if (sprint.getState() != SprintState.ACTIVE)
+            throw error(HttpStatus.CONFLICT,"Sprint không còn ACTIVE, vui lòng tải lại board");
+        if (!sprintIssues.existsById(new SprintIssueId(sprintId,issueId)))
+            throw error(HttpStatus.CONFLICT,"Issue không còn thuộc sprint, vui lòng tải lại board");
     }
 
     /** Tra board từ URL, không nhận project từ client; thiếu trả 404 và không ghi DB. */
@@ -141,7 +164,8 @@ public class BoardCardService {
     /** Service cũng kiểm body để caller nội bộ không bỏ qua validation HTTP; chưa đọc/ghi DB. */
     private void validate(MoveBoardIssueRequest request) {
         if (request == null || request.getColumnId() == null || request.getColumnId() <= 0 || request.getStatusId() == null || request.getStatusId() <= 0
-                || request.getPosition() == null || request.getPosition() < 0 || request.getExpectedVersion() == null || request.getExpectedVersion() < 0) {
+                || request.getPosition() == null || request.getPosition() < 0 || request.getExpectedVersion() == null || request.getExpectedVersion() < 0
+                || request.getSprintId() != null && request.getSprintId() <= 0) {
             throw error(HttpStatus.BAD_REQUEST,"Thiếu hoặc sai cột/trạng thái/vị trí/version");
         }
     }
