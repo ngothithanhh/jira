@@ -90,7 +90,7 @@ class PostgresRegressionIT {
             SprintMetricsService.class, ScrumReportService.class, AccountManagementService.class,
             ProjectMemberServiceImpl.class, UserRoleServiceImpl.class, com.example.jira.security.GlobalSecurity.class,
             com.example.jira.security.CustomUserDetailsService.class, IssueCommentServiceImpl.class,
-            NotificationInboxService.class, AdminQueryService.class, DatabaseSeeder.class, IssueAttachmentServiceImpl.class,ProjectIssueTypeServiceImpl.class,WorkflowRuleServiceImpl.class,IssueStatusServiceImpl.class,IssueTypeServiceImpl.class,AdminUserQueryService.class,com.example.jira.security.AdminRoleLock.class,AdminRoleQueryService.class,PermissionServiceImpl.class,RolePermissionServiceImpl.class,ProjectServiceImpl.class,ProjectStatsRepository.class})
+            NotificationInboxService.class, AdminQueryService.class, ProjectAuditQueryService.class, DatabaseSeeder.class, IssueAttachmentServiceImpl.class,ProjectIssueTypeServiceImpl.class,WorkflowRuleServiceImpl.class,IssueStatusServiceImpl.class,IssueTypeServiceImpl.class,AdminUserQueryService.class,com.example.jira.security.AdminRoleLock.class,AdminRoleQueryService.class,PermissionServiceImpl.class,RolePermissionServiceImpl.class,ProjectServiceImpl.class,ProjectStatsRepository.class})
     static class Config {
         // Cleanup container chạy khi context đóng; local cluster do script dừng sau khi Maven kết thúc.
         @Bean org.springframework.beans.factory.DisposableBean postgresCleanup() {
@@ -158,6 +158,7 @@ class PostgresRegressionIT {
     @Autowired NotificationInboxService inbox;
     @Autowired NotificationRepository notificationRows;
     @Autowired AdminQueryService adminQueries;
+    @Autowired ProjectAuditQueryService projectAudit;
     @Autowired DatabaseSeeder seeder;
     @Autowired ProjectIssueTypeServiceImpl configurationTypes;
     @Autowired WorkflowRuleServiceImpl configurationWorkflow;
@@ -565,7 +566,7 @@ class PostgresRegressionIT {
         assertThat(jdbc.queryForObject("select count(*) from issue_comments",Integer.class)).isEqualTo(1);
         for (String table : List.of("notifications","issue_transitions","board_issues","sprint_issues","work_logs","issue_versions")) assertThat(jdbc.queryForObject("select count(*) from " + table,Integer.class)).isZero();
         assertThat(jdbc.queryForObject("select count(*) from project_versions",Integer.class)).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from audit_logs where entity_type='ISSUE' and entity_id=?",Integer.class,issue.getIssueId())).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from audit_logs where entity_type='ISSUE' and project_id=? and entity_id=?",Integer.class,project.getProjectId(),issue.getIssueId())).isEqualTo(1);
     }
     // Audit cũng phải nằm trong transaction xóa: lỗi sau ghi audit khôi phục cả issue và comment.
     @Test void failedDeleteAuditRollsBackIssueAndDependencies() {
@@ -944,6 +945,66 @@ class PostgresRegressionIT {
         assertThatThrownBy(adminQueries::overview).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
         assertThatThrownBy(() -> adminQueries.audit(new com.example.jira.dto.audit.AuditSearchRequest())).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
     }
+    /** Thử SQL 014 độc lập với Hibernate DDL: dữ liệu chắc chắn được backfill, snapshot có sẵn không bị ghi đè. */
+    @Test void auditMigrationBackfillsOnlyTrustedLegacyScopeAndRepeats() throws Exception {
+        var issue = persistedIssue();
+        int id = issue.getIssueId(), scope = project.getProjectId();
+        jdbc.update("update issues set created_at='2026-01-01' where issue_id=?", id);
+        String sql = java.nio.file.Files.readString(java.nio.file.Path.of("scripts/migrations/014_audit_project_scope.sql"));
+        tx(() -> {
+            jdbc.execute("create schema audit_migration");
+            jdbc.execute("create table audit_migration.audit_logs (like public.audit_logs including identity)");
+            jdbc.execute("alter table audit_migration.audit_logs drop column project_id");
+            jdbc.execute("set local search_path to audit_migration, public");
+            jdbc.update("""
+                insert into audit_logs(action,entity_type,entity_id,created_at) values
+                  ('OLD_ISSUE','ISSUE',?,'2026-01-02'), ('TOO_EARLY','ISSUE',?,'2025-01-01'),
+                  ('MISSING','ISSUE',2147483647,'2026-01-02'), ('DELETED_PROJECT','PROJECT',2147483647,'2026-01-02'),
+                  ('USER_CHANGE','USER',?,'2026-01-02'), ('LEGACY_NULL','PROJECT',null,'2026-01-02')
+                """, id,id,scope);
+            jdbc.execute(sql);
+            assertThat(jdbc.queryForObject("select project_id from audit_logs where action='OLD_ISSUE'",Integer.class)).isEqualTo(scope);
+            assertThat(jdbc.queryForObject("select project_id from audit_logs where action='DELETED_PROJECT'",Integer.class)).isEqualTo(Integer.MAX_VALUE);
+            assertThat(jdbc.queryForObject("select count(*) from audit_logs where project_id is null",Integer.class)).isEqualTo(4);
+            jdbc.update("update audit_logs set project_id=987 where action='OLD_ISSUE'");
+            jdbc.execute(sql);
+            assertThat(jdbc.queryForObject("select project_id from audit_logs where action='OLD_ISSUE'",Integer.class)).isEqualTo(987);
+            assertThat(jdbc.queryForObject("select count(*) from pg_indexes where schemaname=current_schema() and indexname='ix_audit_project_order'",Integer.class)).isEqualTo(1);
+            jdbc.execute("drop schema audit_migration cascade");
+            return null;
+        });
+    }
+
+    /** Hai project có cùng ID entity khác loại; count/page phải lấy cùng scope, kể cả khi entity không còn. */
+    @Test void auditProjectUsesSnapshotForPageCountAndNullableActor() {
+        int scope=project.getProjectId();
+        var second=Fixtures.project(0); second.setLead(caller); second.setProjectKey("AUD2"); second=projects.saveAndFlush(second);
+        int other=second.getProjectId();
+        var time=java.time.LocalDateTime.of(2026,1,2,12,0);
+        jdbc.update("""
+            insert into audit_logs(action,entity_type,entity_id,project_id,user_id,created_at) values
+            ('DELETE','ISSUE',7,?,?,?), ('DELETE','ISSUE',7,?,null,?),
+            ('DELETE','SPRINT',7,?,null,?), ('DELETE','ISSUE',7,?,null,?),
+            ('DELETE','ISSUE',7,null,null,?), ('DELETE','ROLE',7,null,null,?)
+            """,scope,caller.getUserId(),time,scope,time,scope,time,other,time,time,time);
+        var request=new com.example.jira.dto.audit.AuditSearchRequest();
+        request.setEntityType(EntityType.ISSUE); request.setEntityId(7); request.setSize(1); request.setAction(" delete ");
+        var first=projectAudit.audit(scope,request);
+        assertThat(first.totalItems()).isEqualTo(2);
+        assertThat(first.totalPages()).isEqualTo(2);
+        assertThat(first.items()).singleElement().satisfies(row -> {assertThat(row.projectId()).isEqualTo(scope);assertThat(row.actorId()).isNull();});
+        request.setPage(1);
+        assertThat(projectAudit.audit(scope,request).items()).singleElement().satisfies(row -> {
+            assertThat(row.actorId()).isEqualTo(caller.getUserId());assertThat(row.auditId()).isLessThan(first.items().get(0).auditId());
+        });
+        request.setPage(0);request.setSystemOnly(true);
+        assertThat(projectAudit.audit(scope,request).totalItems()).isEqualTo(1);
+        request.setProjectId(other);
+        assertThatThrownBy(() -> projectAudit.audit(scope,request)).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        request.setProjectId(null);request.setActorId(caller.getUserId());
+        assertThatThrownBy(() -> projectAudit.audit(scope,request)).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+    }
+
     // Mô phỏng dữ liệu cũ có version null/varchar ngắn rồi kiểm backfill và lưu text dài hơn 255 ký tự.
     @Test void collaborationMigrationBackfillsVersionAndWidensCommentText() throws Exception {
         var issue=persistedIssue(); jdbc.execute("alter table issue_comments alter column version drop not null"); jdbc.execute("alter table issue_comments alter column comment_text type varchar(255)");

@@ -28,6 +28,7 @@ class BacklogRegressionTest {
     @Mock SprintIssueRepository links;
     @Mock ProjectSecurity security;
     @Mock EntityManager entityManager;
+    @Mock com.example.jira.service.AuditLogService audit;
     @InjectMocks BacklogService service;
 
     // Scope là project 10; chỉ mock dữ liệu chung vì nhánh 400/403 có thể dừng trước truy vấn.

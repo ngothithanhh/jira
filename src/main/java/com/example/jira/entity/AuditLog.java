@@ -33,7 +33,7 @@ public class AuditLog {
     private EntityType entityType;
 
     @Column(name = "entity_id")
-    private int entityId;
+    private Integer entityId;
 
     // Chụp project sở hữu lúc ghi; không đặt FK để lịch sử còn lại sau khi xóa project.
     @Column(name = "project_id")

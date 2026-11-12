@@ -91,7 +91,7 @@ class IssueQueryRegressionTest {
         when(delete.setParameter("id",5)).thenReturn(delete);
         service.delete(5,2L);
         verify(delete,times(7)).setParameter("id",5); verify(delete,times(7)).executeUpdate();
-        var order = inOrder(issues,audit); order.verify(issues).delete(issue); order.verify(audit).logAction(eq("DELETE"),eq(EntityType.ISSUE),eq(5),contains(issue.getIssueKey()));
+        var order = inOrder(issues,audit); order.verify(issues).delete(issue); order.verify(audit).logProjectAction(eq("DELETE"),eq(EntityType.ISSUE),eq(5),eq(10),contains(issue.getIssueKey()));
     }
     private void attachmentCount(long value) {
         when(entityManager.createQuery(startsWith("select count"),eq(Long.class))).thenReturn(count);

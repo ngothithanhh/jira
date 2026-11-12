@@ -6,7 +6,8 @@ import com.example.jira.enums.EntityType;
 import com.example.jira.repository.AuditLogRepository;
 import com.example.jira.repository.UserRepository;
 import com.example.jira.service.AuditLogService;
-import com.example.jira.ultils.SecurityUtils;
+import com.example.jira.security.UserPrincipal;
+import org.springframework.security.core.context.SecurityContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,10 +43,9 @@ public class AuditLogServiceImpl implements AuditLogService {
     private void save(String action, EntityType entityType, int entityId, Integer projectId, String description) {
         User user = null;
         // Chỉ tác vụ không có danh tính mới mang actor null; lỗi đọc user phải làm transaction thất bại.
-        var authentication = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
-        if (authentication != null && authentication.getPrincipal() instanceof com.example.jira.security.UserPrincipal) {
-            int userId = SecurityUtils.getCurrentUserId();
-            user = userRepository.findById(userId).orElse(null);
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.isAuthenticated() && authentication.getPrincipal() instanceof UserPrincipal actor) {
+            user = userRepository.findById(actor.getId()).orElseThrow(() -> new IllegalStateException("Không tìm thấy actor của audit"));
         }
 
         AuditLog log = new AuditLog();

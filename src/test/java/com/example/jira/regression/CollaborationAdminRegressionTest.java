@@ -53,7 +53,7 @@ class CollaborationAdminRegressionTest {
         }
         @Test void editorCanModerateOtherAuthorsComment() {
             comment.setUser(Fixtures.user(2)); when(projectSecurity.hasPermission(10,PermissionName.EDIT_ISSUE)).thenReturn(true);
-            service.deleteComment(5,7,2L); verify(comments).delete(comment); verify(audit).logAction(eq("DELETE_COMMENT"),eq(EntityType.COMMENT),eq(7),anyString());
+            service.deleteComment(5,7,2L); verify(comments).delete(comment); verify(audit).logProjectAction(eq("DELETE_COMMENT"),eq(EntityType.COMMENT),eq(7),eq(10),anyString());
         }
         @Test void removedAuthorNeedsProjectViewPermission() {
             doThrow(new org.springframework.security.access.AccessDeniedException("removed")).when(projectSecurity).requirePermission(10,PermissionName.VIEW_PROJECT);

@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -159,8 +160,8 @@ public class BoardServiceImpl implements BoardService {
 
         boardColumnStatusRepository.save(bcs);
         if (!existed) {
-        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
-        audit.logProjectAction("MAP_COLUMN_STATUS",EntityType.BOARD,column.getBoard().getBoardId(),column.getBoard().getProject().getProjectId(),"Cột ID "+columnId+", trạng thái ID "+statusId);
+            // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+            audit.logProjectAction("MAP_COLUMN_STATUS",EntityType.BOARD,column.getBoard().getBoardId(),column.getBoard().getProject().getProjectId(),"Cột ID "+columnId+", trạng thái ID "+statusId);
         }
     }
 
@@ -174,7 +175,9 @@ public class BoardServiceImpl implements BoardService {
             throw new AccessDeniedException("Không có quyền thực hiện");
         }
 
-        boolean changed = false;
+        // So vị trí đầu và cuối: route legacy có thể gửi cùng cột nhiều lần.
+        var originalPositions = new HashMap<Integer,Integer>();
+        var finalPositions = new HashMap<Integer,Integer>();
         for (UpdateColumnOrderRequest request : requests) {
             BoardColumn column = boardColumnRepository.findById(request.getColumnId())
                     .orElseThrow(() -> new NotFoundException("Không tìm thấy cột với ID: " + request.getColumnId()));
@@ -184,13 +187,14 @@ public class BoardServiceImpl implements BoardService {
                 throw new ConflictException("Cột không thuộc bảng này");
             }
             
-            changed |= !java.util.Objects.equals(column.getPosition(),request.getPosition());
+            originalPositions.putIfAbsent(column.getColumnId(),column.getPosition());
+            finalPositions.put(column.getColumnId(),request.getPosition());
             column.setPosition(request.getPosition());
             boardColumnRepository.save(column);
         }
-        if (changed) {
-        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
-        audit.logProjectAction("ORDER_BOARD_COLUMNS",EntityType.BOARD,boardId,board.getProject().getProjectId(),"Sắp xếp cột board");
+        if (!originalPositions.equals(finalPositions)) {
+            // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+            audit.logProjectAction("ORDER_BOARD_COLUMNS",EntityType.BOARD,boardId,board.getProject().getProjectId(),"Sắp xếp cột board");
         }
     }
 

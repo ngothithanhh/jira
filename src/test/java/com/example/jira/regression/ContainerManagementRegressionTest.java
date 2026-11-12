@@ -31,6 +31,7 @@ class ContainerManagementRegressionTest {
     @Mock ProjectSecurity security;
     @Mock EntityManager entityManager;
     @Mock Query delete;
+    @Mock com.example.jira.service.AuditLogService audit;
     @InjectMocks ContainerManagementService service;
     Sprint sprint; Board board; BoardColumn column;
     @BeforeEach void scope() {

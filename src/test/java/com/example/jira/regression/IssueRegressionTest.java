@@ -39,6 +39,7 @@ class IssueRegressionTest {
     @Mock IssueTransitionRepository transitions;
     @Mock NotificationService notifications;
     @Mock WorkflowRuleRepository workflow;
+    @Mock com.example.jira.service.AuditLogService audit;
     @InjectMocks IssueServiceImpl service;
     @BeforeEach void identifyCaller() {
         Fixtures.login(1);

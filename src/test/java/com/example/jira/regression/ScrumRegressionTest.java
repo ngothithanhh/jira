@@ -26,6 +26,7 @@ class ScrumRegressionTest {
         @Mock IssueRepository issues;
         @Mock SprintIssueRepository backlog;
         @Mock ProjectSecurity security;
+        @Mock com.example.jira.service.AuditLogService audit;
         @InjectMocks SprintServiceImpl service;
         // Khóa project là bước mới của mọi mutation; lenient vì case thiếu quyền dừng trước khóa.
         @BeforeEach void projectLock() {
@@ -144,6 +145,7 @@ class ScrumRegressionTest {
         @Mock IssueStatusRepository statuses;
         @Mock BoardColumnStatusRepository mappings;
         @Mock ProjectSecurity security;
+        @Mock com.example.jira.service.AuditLogService audit;
         @InjectMocks BoardServiceImpl service;
         // Board mẫu thuộc project 10; cột mẫu là của board 50.
         private Board board() { var b = new Board(); b.setBoardId(50); b.setProject(Fixtures.project(10)); return b; }
@@ -195,6 +197,16 @@ class ScrumRegressionTest {
             when(security.hasPermission(10, PermissionName.MANAGE_BOARD)).thenReturn(true);
             var r = new UpdateColumnOrderRequest(); r.setColumnId(60); r.setPosition(3);
             service.updateColumnOrder(50, List.of(r)); assertThat(c.getPosition()).isEqualTo(3); verify(columns).save(c);
+        }
+        @Test void legacyReorderReturningToOriginalPositionDoesNotAudit() {
+            var b = board(); var c = column(b, 60); c.setPosition(1);
+            when(boards.findById(50)).thenReturn(Optional.of(b)); when(columns.findById(60)).thenReturn(Optional.of(c));
+            when(security.hasPermission(10, PermissionName.MANAGE_BOARD)).thenReturn(true);
+            var move = new UpdateColumnOrderRequest(); move.setColumnId(60); move.setPosition(2);
+            var back = new UpdateColumnOrderRequest(); back.setColumnId(60); back.setPosition(1);
+            service.updateColumnOrder(50, List.of(move,back));
+            assertThat(c.getPosition()).isEqualTo(1);
+            verifyNoInteractions(audit);
         }
         // Unmap chỉ xóa liên kết tồn tại, không xóa trạng thái gốc.
         @Test void unmapDeletesLinkOnly() {

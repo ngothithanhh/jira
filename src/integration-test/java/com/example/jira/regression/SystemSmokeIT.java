@@ -91,6 +91,17 @@ class SystemSmokeIT {
         JsonNode velocity=call("GET","/api/projects/"+projectId+"/reports/velocity",token,null,200); assertThat(velocity.get(0).path("completedPoints").asInt()).isEqualTo(5);
         JsonNode burndown=call("GET","/api/sprints/"+sprintId+"/reports/burndown",token,null,200); assertThat(burndown.path("baselineAvailable").asBoolean()).isTrue(); assertThat(burndown.path("points").size()).isGreaterThanOrEqualTo(2);
         JsonNode audit=call("GET","/api/admin/audit-logs?entityType=COMMENT&entityId="+commentId,token,null,200); assertThat(audit.path("totalItems").asInt()).isEqualTo(3);
+        String auditPath="/api/projects/"+projectId+"/audit-logs";
+        String issueAudit="?entityType=ISSUE&entityId="+issueId;
+        var projectAudit=call("GET",auditPath+issueAudit+"&size=1",token,null,200);
+        assertThat(projectAudit.path("totalItems").asInt()).isGreaterThanOrEqualTo(4);
+        assertThat(projectAudit.path("items").size()).isEqualTo(1);
+        assertThat(projectAudit.path("items").get(0).path("projectId").asInt()).isEqualTo(projectId);
+        call("GET",auditPath+"?projectId=",token,null,400);
+        call("GET",auditPath+"?projectId="+(projectId+1),token,null,400);
+        for(String invalid:List.of("entityId=1","entityType=NOPE","actorId=1&systemOnly=true","page=2147483647&size=2","size=101",
+                "createdFrom=2026-03-01T00:00:00&createdTo=2026-02-01T00:00:00"))
+            call("GET",auditPath+"?"+invalid,token,null,400);
         assertThat(call("GET","/api/admin/overview",token,null,200).path("issues").asInt()).isEqualTo(1);
         JsonNode regular=call("POST","/api/auth/register",null,Map.of("email","smoke-user@test.invalid","password","smoke-password","userName","smoke-user","fullName","User"),200);
         String regularToken=regular.path("token").asText();
@@ -105,12 +116,30 @@ class SystemSmokeIT {
         assertThat(call("GET","/api/notifications/unread-count",regularToken,null,200).path("count").asInt()).isEqualTo(1);
         assertThat(call("PUT","/api/notifications/read-all",regularToken,null,200).path("updated").asInt()).isEqualTo(1);
         call("GET","/api/issues/"+issueId,regularToken,null,200);
+        call("GET",auditPath,regularToken,null,403);
+        call("GET","/api/admin/audit-logs",regularToken,null,403);
+        int leadProject=call("POST","/api/projects/create",regularToken,Map.of("projectName","Other audit scope","projectKey","AUDOTHER"),200).path("projectId").asInt();
+        assertThat(call("GET","/api/projects/"+leadProject+"/audit-logs",regularToken,null,200).path("totalItems").asInt()).isEqualTo(1);
+        int auditRole=call("POST","/api/user-role",token,Map.of("roleName","AUDIT_HTTP"),201).path("role").asInt();
+        int update=0;
+        for(var entry:call("GET","/api/admin/role-permissions",token,null,200).path("permissions"))
+            if(entry.path("permissionName").asText().equals("UPDATE_PROJECT"))update=entry.path("permissionId").asInt();
+        assertThat(update).isPositive();
+        call("PUT","/api/roles/"+auditRole+"/permissions",token,Map.of("expectedPermissionIds",List.of(),"permissionIds",List.of(update)),200);
+        call("DELETE","/api/projects/"+projectId+"/members/"+regularId,token,null,200);
+        call("POST","/api/projects/"+projectId+"/members",token,Map.of("userId",regularId,"roleId",auditRole),200);
+        assertThat(call("GET",auditPath+issueAudit,regularToken,null,200).path("totalItems").asInt()).isEqualTo(projectAudit.path("totalItems").asInt());
+        call("PUT","/api/roles/"+auditRole+"/permissions",token,Map.of("expectedPermissionIds",List.of(update),"permissionIds",List.of()),200);
+        call("GET",auditPath,regularToken,null,403);
         call("POST","/api/account/password",token,Map.of("oldPassword","smoke-password","newPassword","changed-password"),204);
         call("GET","/api/admin/overview",token,null,401);
         String newToken=login(admin.getEmail(),"changed-password"); call("GET","/api/admin/overview",newToken,null,200);
         JsonNode latest=call("GET","/api/issues/"+issueId,newToken,null,200);
         call("DELETE","/api/issues/"+issueId+"?expectedVersion="+latest.path("version").asLong(),newToken,null,204);
         call("GET","/api/issues/"+issueId,newToken,null,404);
+        var deletedAudit=call("GET",auditPath+issueAudit+"&action=delete",newToken,null,200);
+        assertThat(deletedAudit.path("totalItems").asInt()).isEqualTo(1);
+        assertThat(deletedAudit.path("items").get(0).path("projectId").asInt()).isEqualTo(projectId);
         assertThat(call("GET","/api/projects/"+projectId+"/reports/velocity",newToken,null,200).get(0).path("completedPoints").asInt()).isEqualTo(5);
     }
 
@@ -194,7 +223,7 @@ class SystemSmokeIT {
         JsonNode spec=call("GET","/v3/api-docs",null,null,200);
         assertThat(spec.path("components").path("securitySchemes").has("bearerAuth")).isTrue();
         for (String path:List.of("/api/projects/{projectId}/backlog","/api/boards/{boardId}/issues/{issueId}/move",
-                "/api/projects/{projectId}/issues/search","/api/sprints/{sprintId}/reports/burndown","/api/account/password","/api/admin/audit-logs")) {
+                "/api/projects/{projectId}/issues/search","/api/sprints/{sprintId}/reports/burndown","/api/account/password","/api/admin/audit-logs","/api/projects/{projectId}/audit-logs")) {
             assertThat(spec.path("paths").has(path)).as("OpenAPI path %s",path).isTrue();
         }
     }

@@ -33,6 +33,7 @@ class BoardCardRegressionTest {
     @Mock EntityManager entityManager;
     @Mock SprintRepository sprints;
     @Mock SprintIssueRepository sprintIssues;
+    @Mock com.example.jira.service.AuditLogService audit;
     @InjectMocks BoardCardService service;
     Board board; BoardColumn column; Issue issue;
     @BeforeEach void scope() {
@@ -146,6 +147,16 @@ class BoardCardRegressionTest {
         var to = Fixtures.status(2,"Doing",StatusCategory.IN_PROGRESS); var body = request(); body.setStatusId(2);
         when(mappings.findBoardMappings(50)).thenReturn(List.of(mapping(column,to)));
         service.move(50,5,body); verify(issueService).changeIssueStatus(5,2); verifyNoInteractions(wip);
+    }
+    @Test void statusChangeWithinSameColumnAtSameRankDoesNotWriteMoveAudit() {
+        var next=Fixtures.status(2,"Next",StatusCategory.IN_PROGRESS);
+        var body=request(); body.setStatusId(2);
+        var saved=new BoardIssue(); saved.setIssue(issue); saved.setColumn(column); saved.setPosition(0);
+        when(ranks.findBoardRanks(50)).thenReturn(List.of(saved));
+        when(mappings.findBoardMappings(50)).thenReturn(List.of(mapping(column,issue.getStatus()),mapping(column,next)));
+        service.move(50,5,body);
+        verify(issueService).changeIssueStatus(5,2);
+        verifyNoInteractions(audit);
     }
     @Test void deniedMoveDoesNotReadIssue() {
         doThrow(new org.springframework.security.access.AccessDeniedException("denied")).when(security).requirePermission(10,PermissionName.EDIT_ISSUE);

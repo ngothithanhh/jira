@@ -72,7 +72,7 @@ public class AdminQueryService {
         if (request==null || request.getPage()<0 || request.getSize()<1 || request.getSize()>100 || (long)request.getPage()*request.getSize()>Integer.MAX_VALUE
                 || (request.getProjectId()!=null && request.getProjectId()<=0) || (Boolean.TRUE.equals(request.getSystemOnly()) && request.getActorId()!=null)
                 || (request.getEntityId()!=null && (request.getEntityId()<=0 || request.getEntityType()==null)) || (request.getActorId()!=null && request.getActorId()<=0)
-                || (request.getAction()!=null && request.getAction().length()>50) || (request.getCreatedFrom()!=null && request.getCreatedTo()!=null && request.getCreatedFrom().isAfter(request.getCreatedTo()))) {
+                || (request.getAction()!=null && (request.getAction().isBlank() || request.getAction().length()>50 || request.getAction().chars().anyMatch(c -> c<32))) || (request.getCreatedFrom()!=null && request.getCreatedTo()!=null && request.getCreatedFrom().isAfter(request.getCreatedTo()))) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Bộ lọc audit không hợp lệ");
         }
     }

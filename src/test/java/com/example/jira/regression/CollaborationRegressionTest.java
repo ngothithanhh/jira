@@ -71,6 +71,7 @@ class CollaborationRegressionTest {
         @Mock IssueAttachmentRepository attachments; @Mock IssueAttachmentContentRepository contents;
         @Mock IssueRepository issues; @Mock UserRepository users; @Mock ProjectSecurity security; @Mock ProjectRepository projects;
         @Mock ProjectMemberRepository members; @Mock jakarta.persistence.EntityManager entityManager;
+        @Mock com.example.jira.service.AuditLogService audit;
         @InjectMocks IssueAttachmentServiceImpl service;
         private final MockMultipartFile file=new MockMultipartFile("file","sample.txt","text/plain",new byte[]{1,2});
         @BeforeEach void setup() {
@@ -195,7 +196,13 @@ class CollaborationRegressionTest {
             when(users.findById(1)).thenReturn(Optional.of(Fixtures.user(1)));
             service.logAction("UPDATE", EntityType.PROJECT, 10, "changed");
             verify(repository).save(argThat(a -> a.getUser().getUserId() == 1 && a.getEntityId() == 10
-                    && a.getEntityType() == EntityType.PROJECT && a.getCreatedAt() != null));
+                    && a.getEntityType() == EntityType.PROJECT && a.getProjectId() == 10 && a.getCreatedAt() != null));
+        }
+        @Test void failedActorLookupCannotBecomeASystemAction() {
+            when(users.findById(1)).thenThrow(new IllegalStateException("database unavailable"));
+            assertThatThrownBy(() -> service.logProjectAction("DELETE", EntityType.ISSUE, 7, 10, "deleted"))
+                    .hasMessage("database unavailable");
+            verifyNoInteractions(repository);
         }
         // Tác vụ hệ thống chưa đăng nhập vẫn lưu audit với actor null.
         @Test void systemActionAllowsAbsentActor() {

@@ -107,8 +107,9 @@ public class IssueCommentServiceImpl implements IssueCommentService {
         if (request==null) throw error(HttpStatus.BAD_REQUEST,"Thiếu nội dung");
         text(request.commentText());
         IssueComment comment = writable(issueId,commentId,request.expectedVersion());
+        boolean changed = !java.util.Objects.equals(comment.getCommentText(), request.commentText());
         comment.setCommentText(request.commentText()); comment.setUpdatedAt(LocalDateTime.now()); issueCommentRepository.save(comment);
-        audit.logProjectAction("UPDATE_COMMENT",EntityType.COMMENT,commentId,comment.getIssue().getProject().getProjectId(),"Sửa bình luận của issue ID " + issueId);
+        if (changed) audit.logProjectAction("UPDATE_COMMENT",EntityType.COMMENT,commentId,comment.getIssue().getProject().getProjectId(),"Sửa bình luận của issue ID " + issueId);
         entityManager.flush(); return IssueCommentMapper.toResponse(comment);
     }
 
