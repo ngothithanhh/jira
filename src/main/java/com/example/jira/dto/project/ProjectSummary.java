@@ -15,4 +15,10 @@ public class ProjectSummary {
     private String description;
     private UserSummary leader;
 
+    // Số liệu theo dữ liệu thật của đúng project; không lấy từ fixture FE hoặc đếm riêng từng dòng.
+    private long issueCount;
+    private long memberCount;
+    private long sprintCount;
+    private String activeSprintName;
+
 }

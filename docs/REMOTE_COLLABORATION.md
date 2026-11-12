@@ -2,6 +2,8 @@
 
 Cập nhật 12/11/2026 theo yêu cầu mới: **“bên kia cũng nối fe be đi cho nhanh”**. Bản này thay thế phân công chỉ làm backend. Máy kia nhận **B1 Notification, B2 Báo cáo Scrum**, làm đủ FE → BFF → API → DB. Đây là plan bàn giao, chưa phải xác nhận các màn đó đã nối xong.
 
+> Sau phần project2A, ProjectSummary có thêm grouped counts và FE đã bổ sung protected project mutation, response rỗng, helper actor-bound mutation/completion và project layout/gate. Máy kia fetch baseline mới trước patch B0; đọc BE docs/PROJECT_MANAGEMENT_API.md và FE docs/CONNECTED_PROJECTS.md để không ghi đè shared transport/layout. Không có migration mới hoặc thay API notification/report ở đợt project.
+
 ## 1. Nhánh phải lấy
 
 | Repo | Nhánh dùng làm nền đã tích hợp phần 1 | Vai trò |

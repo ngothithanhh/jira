@@ -79,6 +79,15 @@ class ApiRegressionTest {
         verify(inbox).unreadCount(); verify(inbox).readAll(); verify(inbox).delete(7);
         verify(adminQueries).audit(argThat(request -> request.getEntityId()==5 && request.getActorId()==2 && request.getPage()==1)); verify(adminQueries).overview();
     }
+
+    // Controller chặn tên trắng và mô tả vượt cột varchar255 trước khi gọi service ghi project.
+    @Test void projectValidationRejectsInvalidInputsBeforeService() throws Exception {
+        mvc.perform(post("/api/projects/create").header("Authorization",bearer()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"projectName\":\"  \",\"projectKey\":\"TEAM\"}")).andExpect(status().isBadRequest());
+        mvc.perform(patch("/api/projects/10").header("Authorization",bearer()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"projectName\":\"Team\",\"description\":\""+"a".repeat(256)+"\"}")).andExpect(status().isBadRequest());
+        verifyNoInteractions(projects);
+    }
     @Test void commentVersionAndAuditQueryValidationRejectInvalidBody() throws Exception {
         mvc.perform(put("/api/issues/5/comments/7").header("Authorization",bearer()).contentType(MediaType.APPLICATION_JSON).content("{\"commentText\":\"Changed\"}")).andExpect(status().isBadRequest());
         mvc.perform(get("/api/admin/audit-logs?actorId=-1").header("Authorization",bearer())).andExpect(status().isBadRequest());
@@ -309,7 +318,7 @@ class ApiRegressionTest {
     // Mỗi dòng là một route đang có, không thêm route cho chức năng chưa triển khai.
     static Stream<Arguments> mutations() {
         return Stream.of(
-            Arguments.of("POST", "/api/projects/create", "{\"projectKey\":\"TEAM\"}", 200, "project.create"),
+            Arguments.of("POST", "/api/projects/create", "{\"projectKey\":\"TEAM\",\"projectName\":\"Team\"}", 200, "project.create"),
             Arguments.of("PATCH", "/api/projects/10", "{\"projectName\":\"Changed\"}", 200, "project.update"),
             Arguments.of("DELETE", "/api/projects/10", "", 200, "project.delete"),
             Arguments.of("POST", "/api/issues", "{\"projectId\":10,\"summary\":\"Task\"}", 201, "issue.create"),

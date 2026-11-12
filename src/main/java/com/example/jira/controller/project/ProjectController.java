@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import jakarta.validation.Valid;
 
 @RestController
 @RequestMapping("/api/projects")
@@ -16,7 +17,7 @@ public class ProjectController {
     private final ProjectService projectService;
 
     @PostMapping("/create")
-    public ProjectSummary create(@RequestBody CreateProjectRequest request){
+    public ProjectSummary create(@Valid @RequestBody CreateProjectRequest request){
         return projectService.createProject(request);
     }
 
@@ -31,7 +32,7 @@ public class ProjectController {
     }
 
     @PatchMapping("/{id}")
-    public ProjectSummary updateProject(@PathVariable int id, @RequestBody UpdateProjectRequest request){
+    public ProjectSummary updateProject(@PathVariable int id, @Valid @RequestBody UpdateProjectRequest request){
         return projectService.updateProject(id, request);
     }
 

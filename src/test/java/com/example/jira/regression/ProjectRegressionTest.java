@@ -31,6 +31,7 @@ class ProjectRegressionTest {
         @Mock GlobalSecurity global;
         @Mock ProjectSecurity security;
         @Mock AuditLogService audit;
+        @Mock ProjectStatsRepository stats;
         @InjectMocks ProjectServiceImpl service;
         // Tạo project lấy lead từ user đang đăng nhập, không từ request của client.
         @Test void createUsesAuthenticatedLead() {
@@ -45,7 +46,7 @@ class ProjectRegressionTest {
             when(users.findById(1)).thenReturn(Optional.of(Fixtures.user(1)));
             when(global.hasPermission(PermissionName.CREATE_PROJECT)).thenReturn(true);
             when(projects.existsByProjectKey("TEAM")).thenReturn(true);
-            var r = new CreateProjectRequest(); r.setProjectKey("TEAM");
+            var r = new CreateProjectRequest(); r.setProjectKey("TEAM"); r.setProjectName("Team");
             assertThatThrownBy(() -> service.createProject(r)).hasMessageContaining("tồn tại"); verify(projects, never()).save(any());
         }
         // Không có quyền tạo không được lưu project.
@@ -78,6 +79,30 @@ class ProjectRegressionTest {
         @Test void outsiderCannotReadProject() {
             when(projects.findById(10)).thenReturn(Optional.of(Fixtures.project(10)));
             assertThatThrownBy(() -> service.getProject(10)).isInstanceOf(RuntimeException.class);
+        }
+        // Chỉ gửi ID được VIEW_PROJECT tới thống kê; trường count/tên sprint lấy đúng response của repository.
+        @Test void listStatisticsOnlyReadsVisibleProjects() {
+            when(projects.findAll()).thenReturn(List.of(Fixtures.project(10), Fixtures.project(20)));
+            when(security.hasPermission(10, PermissionName.VIEW_PROJECT)).thenReturn(true);
+            when(stats.read(List.of(10))).thenReturn(Map.of(10, new ProjectStatsRepository.Counts(8,3,2,"Sprint 2")));
+            var result = service.getProjects(); assertThat(result).hasSize(1);
+            assertThat(result.get(0).getIssueCount()).isEqualTo(8); assertThat(result.get(0).getMemberCount()).isEqualTo(3);
+            assertThat(result.get(0).getSprintCount()).isEqualTo(2); assertThat(result.get(0).getActiveSprintName()).isEqualTo("Sprint 2");
+            verify(stats).read(List.of(10));
+        }
+        // Tên rỗng bị từ chối trước lưu, không dựa vào NOT NULL vì chuỗi trắng vẫn được DB chấp nhận.
+        @Test void createRejectsBlankNameBeforeSave() {
+            when(users.findById(1)).thenReturn(Optional.of(Fixtures.user(1)));
+            when(global.hasPermission(PermissionName.CREATE_PROJECT)).thenReturn(true);
+            var r = new CreateProjectRequest(); r.setProjectKey("TEAM"); r.setProjectName("  ");
+            assertThatThrownBy(() -> service.createProject(r)).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+            verify(projects,never()).save(any());
+        }
+        // Không chuyển lỗi query thống kê thành số0; caller phải biết rằng việc tải dữ liệu thất bại.
+        @Test void statisticsFailureDoesNotPretendEmptyProjects() {
+            when(global.isSystemAdmin()).thenReturn(true); when(projects.findAll()).thenReturn(List.of(Fixtures.project(10)));
+            when(stats.read(List.of(10))).thenThrow(new IllegalStateException("database unavailable"));
+            assertThatThrownBy(service::getProjects).isInstanceOf(IllegalStateException.class);
         }
     }
     @Nested @ExtendWith(MockitoExtension.class)

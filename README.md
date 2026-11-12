@@ -5,6 +5,7 @@ Nhánh `feat/backend-integration` chứa backend đã kiểm thử và API cho F
 - [Hai máy cùng nối FE–BE: phân công theo chức năng và prompt giao việc](docs/REMOTE_COLLABORATION.md)
 - [Cấu hình, baseline, migration và khởi chạy](docs/RUN_AND_MIGRATE.md)
 - [Tình trạng 19 nhóm chức năng và giới hạn](docs/FEATURE_STATUS.md)
+- [Project API và grouped counts cho giao diện phần 2A](docs/PROJECT_MANAGEMENT_API.md)
 - [Kiểm chứng backend qua HTTP thật](docs/FINAL_VERIFICATION_RESULTS.md)
 - [Bộ test hồi quy](docs/REGRESSION_TESTS.md)
 - FE tương ứng: [ngothithanhh/jira_fe — feat/backlog-ui-review](https://github.com/ngothithanhh/jira_fe/tree/feat/backlog-ui-review).
