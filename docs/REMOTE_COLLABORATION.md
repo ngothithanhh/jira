@@ -1,13 +1,13 @@
-# Bàn giao làm song song trên hai máy
+# Hai máy cùng nối FE–BE theo nhóm chức năng
 
-Cập nhật 12/11/2026. Người dùng yêu cầu push toàn bộ source và chia việc cho một agent trên máy khác. Tài liệu này là điểm bắt đầu cho đợt nối backend, thay cho các prompt lịch sử chỉ làm UI.
+Cập nhật 12/11/2026 theo yêu cầu mới: **“bên kia cũng nối fe be đi cho nhanh”**. Bản này thay thế phân công chỉ làm backend. Máy kia nhận **B1 Notification, B2 Báo cáo Scrum**, làm đủ FE → BFF → API → DB. Đây là plan bàn giao, chưa phải xác nhận các màn đó đã nối xong.
 
 ## 1. Nhánh phải lấy
 
 | Repo | Nhánh dùng làm nền đã tích hợp phần 1 | Vai trò |
 |---|---|---|
 | https://github.com/ngothithanhh/jira | `feat/backend-integration` | Backend đã có kiểm quyền, version, migration và account context; máy kia bắt đầu tại đây. |
-| https://github.com/ngothithanhh/jira_fe | `feat/backlog-ui-review` | Toàn bộ UI demo và phần 1 nối backend; máy kia chỉ đọc FE. |
+| https://github.com/ngothithanhh/jira_fe | `feat/backlog-ui-review` | Toàn bộ UI demo và phần 1 nối backend; máy kia sửa FE trong domain được giao. |
 
 **Chưa hợp nhất BE với master.** Khi fetch ngày 12/11, `origin/master` ở `bc4c79b`, có 7 commit không nằm trong nhánh local đã test. Nhánh tích hợp có 10 commit nghiệp vụ riêng trước đợt bàn giao; hai phía cùng sửa 37 file. Cả hai nhánh phải được giữ lại, không force-push hoặc chọn toàn bộ một phía để giải conflict.
 
@@ -17,13 +17,68 @@ Các commit remote cần đối chiếu: `2be7708` (issue API), `cd55324` (produ
 
 | Người thực hiện | Phạm vi được nhận | Giữ ngoài phạm vi |
 |---|---|---|
-| Agent ở máy hiện tại | FE: project → issue/detail → product/sprint backlog → sprint/board; BFF allowlist, session, cache, shell và route chung | Không đồng thời sửa dataset/backend mà máy kia đang xử lý. Chỉ nối phần tiếp theo sau khi người dùng kiểm phần 1. |
-| Agent ở máy kia | BE: đối chiếu/hợp nhất hai nhánh theo plan được duyệt; sau đó dataset demo, kiểm invariant, bootstrap và test BE liên quan | Không sửa FE, tự đổi hợp đồng API đã chốt, reset migration cũ hoặc push vào nhánh người khác đang dùng. |
+| Agent ở máy hiện tại | Project/issue/detail/comment/attachment → backlog → sprint/board từ FE tới BE; giữ auth/session/query lifecycle, BFF và shell/layout chung | Không sửa feature notification/report của máy kia. Chỉ nối phần tiếp theo sau khi người dùng kiểm phần 1. |
+| Agent ở máy kia | B1 Notification, B2 Báo cáo Scrum: nối giao diện với API/DB thật, bổ sung BE khi plan cần, chuẩn bị dữ liệu nhỏ và tự test | Không nhận toàn bộ BE, không tự sửa core project/issue/sprint/board, auth/session hoặc merge master. Không làm full dataset/admin/members ở vòng đầu. |
 | Người dùng | Chốt plan nghiệp vụ/hợp đồng khi có khác biệt, kiểm từng phần theo luồng đã bàn giao | Không coi im lặng hoặc thời gian chờ là đồng ý. |
 
-Nên giao lần lượt **hai đầu việc**, không giao chung một yêu cầu “hoàn thiện toàn bộ backend”.
+**Không bắt máy kia chờ hợp nhất toàn bộ master hoặc làm xong seeder 90 issue.** Cả hai dùng baseline BE feat/backend-integration đã test. Sau B1 báo người dùng kiểm rồi dừng trước B2. Các việc hợp nhất BE/full dataset ở mục 3–4 dưới đây là đợt riêng về sau, không còn là nhiệm vụ đầu tiên.
 
-## 3. Đầu việc A — đối chiếu và hợp nhất backend
+### File và nhánh của máy kia
+
+- FE mới: `src/features/connected/notifications/**`, `src/features/connected/reports/**`.
+- Pages mới: `app/app/(protected)/notifications/page.tsx`, `app/app/(protected)/projects/[projectId]/reports/page.tsx`.
+- Tests/docs domain riêng. Dùng UI mẫu notifications-screen.tsx, reports-screen.tsx/charts.tsx để tách phần trình bày; trang thật không dùng DemoProvider/act/fixture.
+- BE được sửa theo plan: NotificationController/NotificationInboxController, NotificationServiceImpl/NotificationInboxService, NotificationRepository, NotificationResponse/NotificationMapper; ScrumReportController, service/impl/ScrumReportService, dto/report/ScrumReport và test liên quan.
+- Tạo `work/notifications` trong cả hai repo từ nhánh nền. Sau B1 đã tích hợp, fetch nền mới rồi tạo `work/scrum-reports` cho B2. BE không sửa thì báo rõ, không cần commit rỗng.
+- Shared `connected/{client.ts,session.tsx,server.ts,shell.tsx,screens.tsx}`, API catch-all, layout/provider/kit/package/config, security/auth, core issue/sprint/board và migration cũ do owner giữ. Patch cần thiết phải tách nhỏ để owner ghép, không sửa chung lẫn feature.
+
+### B0 — patch BFF nhỏ, bàn giao trước
+
+BFF phần 1 chưa cho notification/report đi qua. Máy kia lập plan B0/B1, tách commit B0 để owner hạ tầng ghép/test trước rồi dùng SHA đó làm nền. Hai bên không cùng sửa server.ts trong lúc này; không chép proxy/auth thành bản thứ hai.
+
+1. connectedRequest → backendRoute phân loại public auth/protected GET/protected mutation bằng allowlist method/path/query. Không mở proxy tới URL/API tùy ý.
+2. Mutation notification phải có Bearer và kiểm Origin; login/refresh/logout không gắn Bearer cũ. Không gọi establishSession cho response notification.
+3. Giữ no-store, 401/403/404/409 và cơ chế refresh cũ. Xử lý **200 không body** của mark-one-read và **204** của delete, không json() rồi báo 502.
+4. B1 mở GET notifications?unreadOnly, GET notifications/unread-count, PUT notifications/{id}/read, PUT notifications/read-all, DELETE notifications/{id}. B2 mở GET sprints/project/{projectId}, sprints/{id}/reports/summary, sprints/{id}/reports/burndown, projects/{id}/reports/velocity?limit=N; reference GET/context khác phải ghi rõ.
+5. Test BFF/client cũ và case Origin/Bearer/allowlist/query/response rỗng. Menu/bell wiring cũng tách patch nhỏ để owner gắn sau khi component domain sẵn sàng.
+
+### B1 — Notification đủ luồng
+
+- Route thật `/app/notifications`; query key bắt đầu `connected`, có userId/filter để cache bị bỏ đúng khi đổi phiên.
+- GET `/api/notifications?unreadOnly=false` đọc inbox theo JWT; GET unread-count trả `{count}`. ID item là notifications.notification_id, userId là recipient, actorId là người thao tác, issueId nullable là issues.issue_id; không suy các ID từ tên.
+- DTO hiện không có projectId. Nếu cần link issue thì đề xuất field projectId nullable additive/mapper/test hoặc chờ owner xác nhận route thật; không đoán project hoặc tạo link 404. Item không issue/actor vẫn đọc/xóa được.
+- PUT mark-one trả 200 rỗng, PUT read-all trả `{updated}`, DELETE trả 204. BE kiểm recipient trước ghi notifications.is_read/xóa notification; không sửa issue hoặc inbox khác. Chờ success rồi invalidate list/count, lỗi giữ dữ liệu và báo rõ, không retry mutation mù.
+- Polling có giới hạn/focus chỉ khi cần, cleanup khi đổi user/unmount; không gọi đó là realtime push. NotificationBell export theo domain để owner gắn shell bằng patch riêng.
+- Dữ liệu cục bộ qua API thật: thêm member/assign/comment tạo notification; có hai recipient/read/unread, ca null/legacy tách riêng. Không gửi dịch vụ ngoài và không cần full dataset.
+- Test HTTP/browser/DB thật: login A → inbox → mark-one/count → mark-all/F5 → delete → login B không thấy cache A; B gọi ID của A phải bị từ chối. Kiểm pending/double-click, 200 rỗng/204, empty/403/404/network và mobile.
+- Bàn giao SHA FE+BE, test/giới hạn, URL/tài khoản tự cấp ở máy mình và luồng người dùng kiểm; dừng trước B2.
+
+### B2 — Báo cáo Scrum đủ luồng
+
+- Route `/app/projects/[projectId]/reports`. projectId thuộc projects từ URL; sprintId chọn từ GET `/api/sprints/project/{projectId}` và phải thuộc cùng project. BE vẫn kiểm VIEW_PROJECT theo resource thực.
+- GET sprint summary/burndown và project velocity theo docs/SCRUM_REPORT_API.md. Đọc sprint_metrics/sprint_metric_points; GET report không tự ghi/backfill lịch sử.
+- Query key chứa user/project/sprint/limit, bỏ response cũ khi đổi lựa chọn nhanh; 403/404 không fallback fixture. Không có sprint thì empty state.
+- Summary phân biệt current/committed/completed; null/unavailable giữ đúng nghĩa, không đổi thành 0. Burndown dùng chuỗi event/step, không tự bịa ngày quan sát; LocalDateTime theo quy ước API, không tự thêm Z đổi timestamp.
+- Velocity dùng snapshot CLOSED, không tính lại completed từ issue hiện tại. ACTIVE thiếu baseline/CLOSED legacy thiếu history phải hiện chưa có dữ liệu tương ứng.
+- Dữ liệu/test nhỏ qua core API: create issue/sprint → start → đổi status/estimate/scope → complete → đọc report; có ACTIVE/CLOSED/missing history. Không sửa thuật toán/core service chỉ để làm đẹp chart.
+- Test F5 giữ số liệu DB, CLOSED snapshot bất biến sau sửa issue, đổi project/sprint nhanh không ló số liệu trước, outsider403, empty/error/mobile. Unit/mock không thay cho browser/API/DB thật.
+- Bàn giao project/sprint ID do script máy mình tạo, URL và từng bước thao tác/kết quả; không hardcode ID1. Sau phần này báo người dùng rồi mới nhận nhóm khác.
+
+### Prompt mới gửi agent kia
+
+```text
+Bạn làm fullstack Notification và Báo cáo Scrum trên máy riêng.
+Clone jira nhánh feat/backend-integration và jira_fe nhánh feat/backlog-ui-review cạnh nhau; đọc docs/REMOTE_COLLABORATION.md trong BE.
+Nhiệm vụ mới thay thế phân công chỉ làm BE/reconcile/dataset. Không chờ và không tự merge master.
+Tạo work/notifications ở cả hai repo, trình plan B0/B1 theo luồng chạy để người dùng chốt trước khi code.
+B0 tách patch BFF allowlist/Bearer/Origin/response rỗng thành commit riêng để owner ghép/test trước; không viết lại auth/proxy.
+B1 nối inbox/bell/unread/mark-one/mark-all/delete với API và PostgreSQL thật. Test, commit/push FE+BE liên quan, báo SHA/URL/luồng kiểm rồi dừng.
+Sau B1 được kiểm, fetch nền mới và lập plan B2 trên work/scrum-reports: selector project/sprint, summary, burndown event, velocity snapshot, null/unavailable và quyền project.
+Chỉ sửa file domain/pages được giao. File shared auth/session/BFF/shell/kit và core issue/sprint/board không sửa lẫn feature; patch chung gửi riêng cho owner.
+Không làm admin/members/full dataset hoặc đổi contract/migration cũ khi chưa chốt. Mỗi phần xong báo người dùng kiểm và chờ phản hồi.
+```
+
+## 3. Đợt riêng về sau — đối chiếu và hợp nhất backend
 
 ### Đọc và lập plan trước, chưa merge/code
 
@@ -46,9 +101,9 @@ Nên giao lần lượt **hai đầu việc**, không giao chung một yêu cầ
 
 Một bộ API duy nhất không duplicate route; phần 1 FE vẫn login/refresh/logout/context/list project đúng. Tính năng bổ sung được ghi rõ, migration có đường nâng cấp, test có bằng chứng và giới hạn. Chưa coi merge được text là đã tích hợp thành công.
 
-## 4. Đầu việc B — dữ liệu demo và bootstrap
+## 4. Đợt riêng về sau — full dataset và bootstrap
 
-Chỉ bắt đầu sau A hoặc sau khi người dùng chốt rõ một baseline BE duy nhất. Tạo nhánh `work/be-demo-dataset` từ baseline đã chốt.
+Chưa giao ở vòng notification/report. Chỉ bắt đầu khi người dùng giao riêng và chốt rõ baseline; tạo `work/be-demo-dataset`. Dữ liệu nhỏ để test B1/B2 vẫn được phép chuẩn bị riêng như mục 2.
 
 ### Phạm vi file dự kiến
 
@@ -82,11 +137,12 @@ cd scrum-workspace
 git clone --branch feat/backend-integration https://github.com/ngothithanhh/jira.git jira
 git clone --branch feat/backlog-ui-review https://github.com/ngothithanhh/jira_fe.git jira_fe
 cd jira
-git switch -c work/be-reconcile
+git switch -c work/notifications
 git fetch origin
+git -C ../jira_fe switch -c work/notifications
 ```
 
-Đọc trước: tài liệu này → docs/FEATURE_STATUS.md → docs/RUN_AND_MIGRATE.md → docs/FINAL_VERIFICATION_RESULTS.md → các *_API.md → FE docs/BACKEND_INTEGRATION_PLAN.md và docs/CONNECTED_PART1.md.
+Đọc trước: tài liệu này → docs/RUN_AND_MIGRATE.md → docs/COLLABORATION_ADMIN_API.md và docs/SCRUM_REPORT_API.md → FE docs/BACKEND_INTEGRATION_PLAN.md, docs/CONNECTED_PART1.md và code domain. Mục hợp nhất/full dataset là kế hoạch tương lai, không phải việc chặn B1/B2.
 
 Backend cần JDK17, Maven wrapper, PostgreSQL18 đã được kiểm trên máy gốc. Copy docs/application-example.properties sang src/main/resources/application.properties và tự đặt DB_URL/DB_USER/DB_PASSWORD/JWT_SECRET ở máy mới. Tạo DB riêng rỗng rồi dùng scripts/migrate.ps1; chạy BE với validate. Không copy cấu hình/credential/JAR từ máy gốc. Script migration hiện hướng Windows; nếu máy kia dùng Linux phải đề xuất/test bootstrap tương đương, không tự thay bằng ddl-auto=update.
 

@@ -2,7 +2,7 @@
 
 Nhánh `feat/backend-integration` chứa backend đã kiểm thử và API cho FE phần 1. **Chưa hợp nhất với master remote** đang có thêm các thay đổi khác; đọc handoff trước khi tiếp tục phát triển.
 
-- [Phân công hai máy và kế hoạch bắt đầu cho agent backend](docs/REMOTE_COLLABORATION.md)
+- [Hai máy cùng nối FE–BE: phân công theo chức năng và prompt giao việc](docs/REMOTE_COLLABORATION.md)
 - [Cấu hình, baseline, migration và khởi chạy](docs/RUN_AND_MIGRATE.md)
 - [Tình trạng 19 nhóm chức năng và giới hạn](docs/FEATURE_STATUS.md)
 - [Kiểm chứng backend qua HTTP thật](docs/FINAL_VERIFICATION_RESULTS.md)
