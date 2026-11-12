@@ -2,6 +2,8 @@ package com.example.jira.regression;
 
 import com.example.jira.controller.*;
 import com.example.jira.controller.auth.AuthController;
+import com.example.jira.verification.VerificationController;
+import com.example.jira.verification.VerificationService;
 import com.example.jira.controller.user.UserController;
 import com.example.jira.controller.issue.*;
 import com.example.jira.controller.project.*;
@@ -29,7 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.assertj.core.api.Assertions.*;
 
 /** Kiểm tra HTTP thật qua MVC và JWT filter; nghiệp vụ service được kiểm tra ở các lớp khác. */
-@WebMvcTest(controllers = {AuthController.class, UserController.class, ProjectController.class,
+@WebMvcTest(controllers = {AuthController.class, VerificationController.class, UserController.class, ProjectController.class,
         ProjectMemberController.class, ProjectIssueTypeController.class, IssueController.class,
         IssueCommentController.class, IssueAttachmentController.class, IssueTypeController.class,
         IssueStatusController.class, UserRoleController.class, PermissionController.class,
@@ -42,6 +44,7 @@ class ApiRegressionTest {
     @Autowired JwtUtil jwt;
     @MockBean CustomUserDetailsService details;
     @MockBean AuthService auth;
+    @MockBean VerificationService verification;
     @MockBean UserService users;
     @MockBean ProjectService projects;
     @MockBean ProjectMemberService members;
@@ -397,13 +400,16 @@ class ApiRegressionTest {
                 .andExpect(jsonPath("$.refreshToken").value("refresh"));
         verify(auth).login(argThat(r -> "user1@test.invalid".equals(r.getEmail()) && "sample".equals(r.getPassword())));
     }
-    // Đăng ký public chuyển đúng email xuống service và trả refresh token.
-    @Test void registerBindsAccountData() throws Exception {
-        when(auth.register(any())).thenReturn(new com.example.jira.dto.auth.AuthResponseDTO("access", "refresh"));
+    // Đăng ký public chuyển sang challenge và không cấp token.
+    @Test void registerReturnsChallengeOnly() throws Exception {
+        var id = java.util.UUID.randomUUID();
+        when(verification.start(any(), any())).thenReturn(new VerificationService.Result(org.springframework.http.HttpStatus.ACCEPTED,
+                null, null, new VerificationService.View(id, "proof", "n***@test.invalid", "PENDING", null, null, null, "QUEUED", null)));
         mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"email\":\"new@test.invalid\",\"password\":\"sample\",\"userName\":\"new\"}"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.refreshToken").value("refresh"));
-        verify(auth).register(argThat(r -> "new@test.invalid".equals(r.getEmail()) && "new".equals(r.getUserName())));
+                .content("{\"email\":\"new@test.invalid\",\"password\":\"sample-password\",\"userName\":\"new\",\"fullName\":\"New User\"}"))
+                .andExpect(status().isAccepted()).andExpect(jsonPath("$.challengeId").value(id.toString()))
+                .andExpect(jsonPath("$.token").doesNotExist()).andExpect(jsonPath("$.refreshToken").doesNotExist());
+        verifyNoInteractions(auth);
     }
     // Refresh và logout lấy token từ body, không nhầm với access token trong header.
     @Test void refreshAndLogoutUseBodyRefreshToken() throws Exception {

@@ -28,7 +28,7 @@ public final class MailOutbox {
 
     /** Transaction nghiệp vụ sở hữu aggregateId/generation. Rollback của caller cũng hủy mail mới. */
     public Optional<UUID> enqueue(Kind kind, UUID aggregateId, int generation, MailMessage message, Instant expiresAt) {
-        requireBusinessTransaction();
+        requireBusinessTransaction(db);
         Objects.requireNonNull(aggregateId);
         if (generation < 1) throw new IllegalArgumentException("Generation mail phải dương");
         UUID id = UUID.randomUUID();
@@ -46,7 +46,12 @@ public final class MailOutbox {
 
     /** Resend/revoke hủy job chưa dispatch và chặn retry của job đang gửi, trong transaction aggregate. */
     public int supersedeThrough(Kind kind, UUID aggregateId, int generation) {
-        requireBusinessTransaction();
+        return supersedeThrough(db, kind, aggregateId, generation);
+    }
+
+    /** Supersede cũng chạy trên API instance tắt worker hoặc thiếu cấu hình provider. */
+    public static int supersedeThrough(JdbcTemplate db, Kind kind, UUID aggregateId, int generation) {
+        requireBusinessTransaction(db);
         return db.update("""
                 UPDATE mail_outbox SET superseded=true,
                     status=CASE WHEN status='SENDING' AND dispatch_started_at IS NOT NULL THEN status ELSE 'SUPERSEDED' END,
@@ -58,6 +63,14 @@ public final class MailOutbox {
                 WHERE kind=? AND aggregate_type=? AND aggregate_id=? AND generation<=?
                     AND status IN ('QUEUED','RETRY_WAIT','SENDING') AND NOT superseded
                 """, kind.name(), kind.aggregateType, aggregateId, generation);
+    }
+
+    /** Trạng thái của đúng generation đã được service xác thực, không đọc recipient hoặc nội dung thư. */
+    public static Optional<String> deliveryState(JdbcTemplate db, Kind kind, UUID aggregateId, int generation) {
+        return db.query("""
+                SELECT status FROM mail_outbox WHERE kind=? AND aggregate_type=? AND aggregate_id=? AND generation=?
+                """, (rs, row) -> rs.getString(1), kind.name(), kind.aggregateType, aggregateId, generation)
+                .stream().findFirst();
     }
 
     /** Một câu SQL chọn và claim cùng hàng. Mỗi worker chỉ giữ một lease và xử lý ngoài transaction. */
@@ -133,7 +146,7 @@ public final class MailOutbox {
 
     private static OffsetDateTime utc(Instant time) { return time.atOffset(ZoneOffset.UTC); }
 
-    private void requireBusinessTransaction() {
+    private static void requireBusinessTransaction(JdbcTemplate db) {
         if (!TransactionSynchronizationManager.isActualTransactionActive()
                 || !TransactionSynchronizationManager.hasResource(Objects.requireNonNull(db.getDataSource()))) {
             throw new IllegalStateException("Mail outbox cần transaction nghiệp vụ trên cùng datasource");

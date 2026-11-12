@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Set;
 
 @Entity
@@ -27,6 +28,9 @@ public class User {
 
     @Column(unique = true, nullable = false,length = 100)
     private String email;
+
+    @Column(name = "email_verified_at")
+    private Instant emailVerifiedAt;
 
     @Column(name = "password_hash", nullable = false)
     private String passwordHash;

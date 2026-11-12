@@ -92,8 +92,8 @@ class SystemSmokeIT {
         JsonNode burndown=call("GET","/api/sprints/"+sprintId+"/reports/burndown",token,null,200); assertThat(burndown.path("baselineAvailable").asBoolean()).isTrue(); assertThat(burndown.path("points").size()).isGreaterThanOrEqualTo(2);
         JsonNode audit=call("GET","/api/admin/audit-logs?entityType=COMMENT&entityId="+commentId,token,null,200); assertThat(audit.path("totalItems").asInt()).isEqualTo(3);
         assertThat(call("GET","/api/admin/overview",token,null,200).path("issues").asInt()).isEqualTo(1);
-        JsonNode regular=call("POST","/api/auth/register",null,Map.of("email","smoke-user@test.invalid","password","smoke-password","userName","smoke-user","fullName","User"),200);
-        String regularToken=regular.path("token").asText();
+        seedVerifiedUser("smoke-user", "smoke-password");
+        String regularToken=login("smoke-user@test.invalid", "smoke-password");
         call("GET","/api/admin/users",regularToken,null,403);call("GET","/api/user",regularToken,null,403);
         call("GET","/api/admin/users/"+admin.getUserId(),regularToken,null,403);
         JsonNode directory=call("GET","/api/admin/users?keyword=smoke&size=1",token,null,200);assertThat(directory.path("totalItems").asInt()).isEqualTo(2);assertThat(directory.path("items").size()).isEqualTo(1);
@@ -118,8 +118,7 @@ class SystemSmokeIT {
     /** HTTP thật chứng minh user không global role tự tạo project và chỉ quản lý project mình sở hữu. */
     @Test void ordinaryUserOwnsProjectAndAdminRoleCrudIsScoped() throws Exception {
         String password="p1-regression-password";
-        for(String name:List.of("p1-owner","p1-other"))
-            call("POST","/api/auth/register",null,Map.of("email",name+"@test.invalid","userName",name,"fullName",name,"password",password),200);
+        for(String name:List.of("p1-owner","p1-other")) seedVerifiedUser(name, password);
         String owner=login("p1-owner@test.invalid",password),other=login("p1-other@test.invalid",password);
         int ownerId=users.findByEmail("p1-owner@test.invalid").orElseThrow().getUserId();
         int otherId=users.findByEmail("p1-other@test.invalid").orElseThrow().getUserId();
@@ -170,6 +169,16 @@ class SystemSmokeIT {
             assertThat(spec.path("paths").has(path)).as("OpenAPI path %s",path).isTrue();
         }
     }
+    private void seedVerifiedUser(String name, String password) {
+        var user = Fixtures.user(0);
+        user.setEmail(name + "@test.invalid");
+        user.setUserName(name);
+        user.setFullName(name);
+        user.setEmailVerifiedAt(java.time.Instant.now());
+        user.setPasswordHash(encoder.encode(password));
+        users.saveAndFlush(user);
+    }
+
     private String login(String email,String password) throws Exception {
         String token=call("POST","/api/auth/login",null,Map.of("email",email,"password",password),200).path("token").asText();
         assertThat(token.isBlank()).isFalse(); return token;

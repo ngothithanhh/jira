@@ -24,7 +24,7 @@ class MailConfiguration {
 
     /** Chỉ dựng worker khi provider được chọn có cấu hình gửi hợp lệ. */
     @Bean
-    MailSender mailSender(ObjectMapper json, @Value("${app.mail.provider:gmail-api}") String provider,
+    MailSender outboxMailSender(ObjectMapper json, @Value("${app.mail.provider:gmail-api}") String provider,
                           @Value("${app.mail.sender-address:}") String sender,
                           @Value("${app.mail.sender-name:Jira}") String name,
                           @Value("${app.gmail.token-file:}") String tokenFile,

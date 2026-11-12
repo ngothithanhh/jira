@@ -21,6 +21,10 @@ public interface UserRepository extends JpaRepository<User, Integer>, org.spring
     Optional<User> findByIdForUpdate(@org.springframework.data.repository.query.Param("id") int id);
     Optional<User> findByUserName(String username);
     Optional<User> findByEmail(String email);
+    @Query(value = """
+            SELECT * FROM users WHERE lower(btrim(email) COLLATE "C")=lower(btrim(:email) COLLATE "C")
+            """, nativeQuery = true)
+    Optional<User> findByCanonicalEmail(@Param("email") String email);
     /** Email duy nhất của users giới hạn kết quả tối đa một hàng. */
     @Query("""
             select new com.example.jira.dto.project.MemberCandidate(u.userId, u.userName, u.fullName)
@@ -32,5 +36,8 @@ public interface UserRepository extends JpaRepository<User, Integer>, org.spring
               )
             """)
     Optional<MemberCandidate> findProjectCandidate(@Param("projectId") int projectId, @Param("email") String email);
-    boolean existsByEmail(String email);
+    @Query(value = """
+            SELECT EXISTS (SELECT 1 FROM users WHERE lower(btrim(email) COLLATE "C")=lower(btrim(:email) COLLATE "C"))
+            """, nativeQuery = true)
+    boolean existsByEmail(@Param("email") String email);
 }

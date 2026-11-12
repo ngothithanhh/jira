@@ -2,7 +2,6 @@ package com.example.jira.service.impl;
 
 import com.example.jira.dto.auth.AuthResponseDTO;
 import com.example.jira.dto.auth.LoginRequestDTO;
-import com.example.jira.dto.auth.RegisterRequestDTO;
 import com.example.jira.dto.user.UserSummary;
 import com.example.jira.entity.RefreshToken;
 import com.example.jira.entity.User;
@@ -15,19 +14,16 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.time.LocalDateTime;
 
 @Service
 @RequiredArgsConstructor
 public class AuthServiceImpl implements AuthService {
 
     private final UserRepository userRepository;
-    private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
     private final JwtUtil jwtUtil;
     private final RefreshTokenService refreshTokenService;
@@ -37,43 +33,16 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @org.springframework.transaction.annotation.Transactional
     public AuthResponseDTO login(LoginRequestDTO request){
-        User found = userRepository.findByEmail(request.getEmail()).orElseThrow(() -> new org.springframework.security.authentication.BadCredentialsException("Sai thông tin đăng nhập"));
+        User found = userRepository.findByCanonicalEmail(request.getEmail()).orElseThrow(() -> new org.springframework.security.authentication.BadCredentialsException("Sai thông tin đăng nhập"));
         User user = userRepository.findByIdForUpdate(found.getUserId()).orElseThrow(() -> new org.springframework.security.authentication.BadCredentialsException("Sai thông tin đăng nhập"));
         entityManager.refresh(user);
         if (!user.isEnabled()) throw new org.springframework.security.authentication.DisabledException("Tài khoản bị khóa");
-        authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword()));
+        authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(user.getEmail(), request.getPassword()));
         String token = jwtUtil.generateToken(user.getEmail(),user.getAuthVersion());
         RefreshToken refreshToken = refreshTokenService.createRefreshToken(user);
 
 //        System.out.println(token+"\n");
         return new AuthResponseDTO(token, refreshToken.getTokenValue());
-    }
-
-    /** Đăng ký tạo users và refresh_tokens trong cùng transaction; email đã dùng trả 409 trước khi ghi. */
-    @Override
-    @org.springframework.transaction.annotation.Transactional
-    public AuthResponseDTO register(RegisterRequestDTO request){
-
-        // Trùng email là xung đột dữ liệu người dùng có thể sửa, không phải lỗi máy chủ 500.
-        if(userRepository.existsByEmail(request.getEmail())){
-            throw new com.example.jira.exception.ConflictException("Email đã tồn tại!");
-        }
-
-        User user = new User();
-        user.setEmail(request.getEmail());
-        user.setFullName(request.getFullName());
-        user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
-        user.setUserName(request.getUserName());
-        user.setCreatedAt(LocalDateTime.now());
-
-        userRepository.save(user);
-
-        String token = jwtUtil.generateToken(user.getEmail());
-
-        RefreshToken refreshToken = refreshTokenService.createRefreshToken(user);
-
-        return new AuthResponseDTO(token, refreshToken.getTokenValue());
-
     }
 
     /** Token từ body được tiêu thụ và rotation trong service có khóa DB; chỉ cấp access token sau commit. */
