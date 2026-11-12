@@ -130,8 +130,8 @@ class SystemSmokeIT {
             if(entry.path("permissionName").asText().equals("UPDATE_PROJECT"))update=entry.path("permissionId").asInt();
         assertThat(update).isPositive();
         call("PUT","/api/roles/"+auditRole+"/permissions",token,Map.of("expectedPermissionIds",List.of(),"permissionIds",List.of(update)),200);
-        call("DELETE","/api/projects/"+projectId+"/members/"+regularId,token,null,200);
-        call("POST","/api/projects/"+projectId+"/members",token,Map.of("userId",regularId,"roleId",auditRole),200);
+        // Thành viên đã có từ fixture; đổi role bằng API thật để kiểm quyền audit, không đi qua lời mời mới.
+        call("PUT","/api/projects/"+projectId+"/members/"+regularId+"/role",token,Map.of("roleId",auditRole),204);
         assertThat(call("GET",auditPath+issueAudit,regularToken,null,200).path("totalItems").asInt()).isEqualTo(projectAudit.path("totalItems").asInt());
         call("PUT","/api/roles/"+auditRole+"/permissions",token,Map.of("expectedPermissionIds",List.of(update),"permissionIds",List.of()),200);
         call("GET",auditPath,regularToken,null,403);

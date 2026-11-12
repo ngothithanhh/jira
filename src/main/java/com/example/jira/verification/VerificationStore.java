@@ -7,7 +7,9 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.UUID;
@@ -124,12 +126,16 @@ class VerificationStore {
         db.update("UPDATE users SET email_verified_at=? WHERE user_id=?", time(now), userId);
     }
 
-    /** Audit dùng user đã xác minh làm entity. Đăng ký public không lấy actor từ header ngoài luồng. */
+    /**
+     * Ghi audit USER sau xác minh trong transaction hiện tại; actor null cho đăng ký public.
+     * created_at không có offset nên dùng giờ JVM như AuditLogService, tránh lệch ngày khi lọc chung.
+     * Các hạn OTP vẫn dùng Instant/UTC qua time(), không đổi cách xét hết hạn.
+     */
     void audit(Integer actorId, int userId, Instant now) {
         db.update("""
                 INSERT INTO audit_logs(user_id,action,entity_type,entity_id,description,created_at)
                 VALUES (?,'VERIFY_EMAIL','USER',?,'Xác minh địa chỉ email',?)
-                """, actorId, userId, time(now).toLocalDateTime());
+                """, actorId, userId, LocalDateTime.ofInstant(now, ZoneId.systemDefault()));
     }
 
     void failedAttempt(Flow flow, Challenge challenge, Instant now) {

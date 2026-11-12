@@ -207,15 +207,17 @@ class ScrumRegressionTest {
             service.updateColumnOrder(50, ColumnOrderToken.of(50, List.of(c)), List.of(r));
             verify(columns).updatePosition(50, 60, 0);
             verify(columns, never()).save(any());
+            verify(audit).logProjectAction("ORDER_BOARD_COLUMNS",EntityType.BOARD,50,10,"Sắp xếp cột board");
         }
-        @Test void legacyReorderReturningToOriginalPositionDoesNotAudit() {
-            var b = board(); var c = column(b, 60); c.setPosition(1);
-            when(boards.findById(50)).thenReturn(Optional.of(b)); when(columns.findById(60)).thenReturn(Optional.of(c));
+        // Token khớp và giữ nguyên mọi vị trí không được ghi audit thay đổi giả.
+        @Test void reorderKeepingOriginalPositionDoesNotAudit() {
+            var b = board(); var c = column(b, 60); c.setPosition(0);
+            when(boards.findById(50)).thenReturn(Optional.of(b));
+            when(columns.findByBoard_BoardIdOrderByPositionAsc(50)).thenReturn(List.of(c));
             when(security.hasPermission(10, PermissionName.MANAGE_BOARD)).thenReturn(true);
-            var move = new UpdateColumnOrderRequest(); move.setColumnId(60); move.setPosition(2);
-            var back = new UpdateColumnOrderRequest(); back.setColumnId(60); back.setPosition(1);
-            service.updateColumnOrder(50, List.of(move,back));
-            assertThat(c.getPosition()).isEqualTo(1);
+            service.updateColumnOrder(50, ColumnOrderToken.of(50,List.of(c)), List.of(new UpdateColumnOrderRequest(60,0)));
+            assertThat(c.getPosition()).isZero();
+            verify(columns, never()).updatePosition(anyInt(),anyInt(),anyInt());
             verifyNoInteractions(audit);
         }
         // Unmap chỉ xóa liên kết tồn tại, không xóa trạng thái gốc.

@@ -1,3 +1,5 @@
+> Tài liệu lưu mốc WIP ban đầu. Xem [INTEGRATION_VERIFICATION.md](INTEGRATION_VERIFICATION.md) và [AUDIT_LOG.md](AUDIT_LOG.md) để biết trạng thái sau khi ghép và kiểm thử.
+
 # Bàn giao audit log — WIP, chưa sẵn sàng chạy
 
 Ngày bàn giao: 2026-11-13. Người dùng yêu cầu dừng triển khai để chuyển máy khác, commit/push nguyên trạng và tổng hợp công việc còn lại.

@@ -129,6 +129,10 @@ class EmailVerificationIT {
         assertThat(count("user_role_assignments")).isEqualTo(roleCount);
         assertThat(count("project_members")).isEqualTo(members);
         assertThat(db.queryForObject("SELECT count(*) FROM audit_logs WHERE entity_id=? AND action='VERIFY_EMAIL'", Integer.class, created.getUserId())).isEqualTo(1);
+        // Audit không có offset phải cùng giờ máy chủ với log project; trạng thái xác minh vẫn giữ Instant.
+        assertThat(db.queryForObject("SELECT created_at FROM audit_logs WHERE entity_id=? AND action='VERIFY_EMAIL'",
+                java.time.LocalDateTime.class,created.getUserId()))
+                .isEqualTo(java.time.LocalDateTime.ofInstant(created.getEmailVerifiedAt(),java.time.ZoneId.systemDefault()));
         assertThat(status(AUTH, null, started).path("state").asText()).isEqualTo("CONSUMED");
         assertThat(login(email, PASSWORD)).isNotBlank();
     }
