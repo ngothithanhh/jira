@@ -19,6 +19,11 @@ public class IssueAttachmentMapper {
             res.setUploadedByUserName(attachment.getUser().getFullName());
         }
         res.setUploadedAt(attachment.getUploadedAt());
+        // Không suy metadata từ URL legacy; client phân biệt dữ liệu chưa có với file rỗng thật.
+        res.setFileName(attachment.getFileName());
+        res.setContentType(attachment.getContentType());
+        res.setFileSize(attachment.getFileSize());
+        res.setDownloadAvailable("LOCAL_DB".equals(attachment.getStorageType()));
 
         return res;
     }

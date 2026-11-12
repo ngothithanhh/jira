@@ -7,6 +7,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name="app.storage.cloudinary-enabled", havingValue="true")
 public class CloudinaryConfig {
 
     @Value("${cloudinary.cloud-name}")

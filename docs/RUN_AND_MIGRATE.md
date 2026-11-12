@@ -2,12 +2,12 @@
 
 Dùng JDK 17, Maven wrapper đã có trong repo và PostgreSQL. Docker chỉ cần nếu chọn integration Testcontainers; script Windows có thể tạo cluster test bằng PostgreSQL 18 đã cài.
 
-Cấu hình cá nhân hiện có được giữ nguyên và không commit. Nếu checkout mới chưa có file cấu hình, copy docs/application-example.properties sang src/main/resources/application.properties. File mẫu dùng biến môi trường DB_URL, DB_USER, DB_PASSWORD, JWT_SECRET; JWT_SECRET cần đủ dài cho HS256 (ít nhất 32 byte). Cấu hình Cloudinary khi cần upload/xóa attachment; các API Scrum/inbox không cần gọi dịch vụ này. Không đưa mật khẩu/khóa vào Git.
+Cấu hình cá nhân hiện có được giữ nguyên và không commit. Nếu checkout mới chưa có file cấu hình, copy docs/application-example.properties sang src/main/resources/application.properties. File mẫu dùng biến môi trường DB_URL, DB_USER, DB_PASSWORD, JWT_SECRET; JWT_SECRET cần đủ dài cho HS256 (ít nhất 32 byte). Attachment lưu metadata và bytea trong PostgreSQL local, không cần Cloudinary. Không đưa mật khẩu/khóa vào Git.
 
 ## DB đã có dữ liệu
 
 1. Dừng phiên bản backend cũ, sao lưu DB và xác nhận đúng tên DB/host đang cập nhật.
-2. Chạy lần lượt các script 001..006 trong scripts/migrations bằng psql -v ON_ERROR_STOP=1, chỉ định -h/-p/-U/-d rõ ràng. psql có thể hỏi mật khẩu tương tác; không ghi mật khẩu vào lệnh hoặc log.
+2. Chạy lần lượt các script 001..008 trong scripts/migrations bằng psql -v ON_ERROR_STOP=1, chỉ định -h/-p/-U/-d rõ ràng. psql có thể hỏi mật khẩu tương tác; không ghi mật khẩu vào lệnh hoặc log. 007 thêm metadata nullable, 008 tạo bảng nội dung bytea; tệp URL cũ không tự được chuyển thành tệp local.
 3. Migration 001 từ chối dữ liệu trùng project/issue_number hoặc issue_key; giải quyết dữ liệu trước khi chạy lại, script không tự xóa. 003 giữ counter số issue đã cấp; 004 không dựng lại lịch sử Scrum cũ.
 4. Chạy bản mới với spring.jpa.hibernate.ddl-auto=validate (DB_DDL_MODE=validate nếu dùng file mẫu). Hibernate validate không thay thế migration. Nếu schema cũ không khớp các entity gốc khác, cần xử lý sai khác riêng; không tự xóa bảng.
 

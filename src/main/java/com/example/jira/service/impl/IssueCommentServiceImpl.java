@@ -53,6 +53,7 @@ public class IssueCommentServiceImpl implements IssueCommentService {
         }
         text(request==null?null:request.getCommentText());
         lockProject(issue.getProject().getProjectId()); entityManager.refresh(issue);
+        projectSecurity.requirePermission(issue.getProject().getProjectId(),PermissionName.VIEW_PROJECT);
 
         int userId = SecurityUtils.getCurrentUserId();
         User user = userRepository.findById(userId)
@@ -129,11 +130,21 @@ public class IssueCommentServiceImpl implements IssueCommentService {
         int actorId=SecurityUtils.getCurrentUserId();
         if ((comment.getUser()==null || comment.getUser().getUserId()!=actorId) && !projectSecurity.hasPermission(projectId,PermissionName.EDIT_ISSUE)) throw error(HttpStatus.FORBIDDEN,"Không có quyền sửa/xóa bình luận");
         lockProject(projectId); entityManager.refresh(comment);
+        // Quyền có thể vừa bị thu hồi khi chờ khóa; kiểm lại ownership và role đã refresh trước ghi.
+        projectSecurity.requirePermission(projectId,PermissionName.VIEW_PROJECT);
+        if ((comment.getUser()==null || comment.getUser().getUserId()!=actorId) && !projectSecurity.hasPermission(projectId,PermissionName.EDIT_ISSUE)) throw error(HttpStatus.FORBIDDEN,"Không có quyền sửa/xóa bình luận");
         if (!java.util.Objects.equals(comment.getVersion(),version)) throw error(HttpStatus.CONFLICT,"Bình luận đã thay đổi, vui lòng tải lại");
         return comment;
     }
     /** projectId lấy từ issue đã kiểm quyền; khóa tới cuối transaction, không tự ghi dữ liệu project. */
-    private void lockProject(int projectId) { projects.findByIdForUpdate(projectId).orElseThrow(() -> error(HttpStatus.NOT_FOUND,"Không tìm thấy dự án")); }
+    private void lockProject(int projectId) {
+        var project=projects.findByIdForUpdate(projectId).orElseThrow(() -> error(HttpStatus.NOT_FOUND,"Không tìm thấy dự án"));
+        entityManager.refresh(project);
+        // EntityManager có thể đã nạp role cũ. Refresh đúng cặp project/user của actor trước kiểm quyền lần hai.
+        var membership=entityManager.find(com.example.jira.entity.ProjectMember.class,new com.example.jira.entity.ProjectMemberId(projectId,SecurityUtils.getCurrentUserId()));
+        if (membership!=null) try { entityManager.refresh(membership); }
+        catch (jakarta.persistence.EntityNotFoundException removed) { throw error(HttpStatus.FORBIDDEN,"Bạn không còn là thành viên dự án"); }
+    }
     /** Service cũng chặn text trống/quá dài cho caller nội bộ không qua Bean Validation. */
     private void text(String value) { if (value==null || value.isBlank() || value.length()>10000) throw error(HttpStatus.BAD_REQUEST,"Bình luận cần 1..10000 ký tự"); }
     /** Tạo lỗi có HTTP status, không ghi nội dung comment vào thông báo lỗi. */

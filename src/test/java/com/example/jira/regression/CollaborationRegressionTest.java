@@ -68,65 +68,77 @@ class CollaborationRegressionTest {
     }
     @Nested @ExtendWith(MockitoExtension.class)
     class Attachments {
-        @Mock IssueAttachmentRepository attachments;
-        @Mock IssueRepository issues;
-        @Mock UserRepository users;
-        @Mock CloudinaryService cloud;
-        @Mock ProjectSecurity security;
+        @Mock IssueAttachmentRepository attachments; @Mock IssueAttachmentContentRepository contents;
+        @Mock IssueRepository issues; @Mock UserRepository users; @Mock ProjectSecurity security; @Mock ProjectRepository projects;
+        @Mock ProjectMemberRepository members; @Mock jakarta.persistence.EntityManager entityManager;
         @InjectMocks IssueAttachmentServiceImpl service;
-        private final MockMultipartFile file = new MockMultipartFile("file", "sample.txt", "text/plain", new byte[]{1, 2});
-        // Upload lưu URL do Cloudinary trả, không lưu nội dung file vào DB.
-        @Test void uploadPersistsReturnedUrlAndOwner() throws Exception {
-            when(issues.findById(5)).thenReturn(Optional.of(Fixtures.issue(5, 10)));
-            when(security.hasPermission(10, PermissionName.EDIT_ISSUE)).thenReturn(true);
-            when(users.findById(1)).thenReturn(Optional.of(Fixtures.user(1)));
-            when(cloud.uploadFile(file)).thenReturn("https://example.invalid/file.txt");
-            when(attachments.save(any())).thenAnswer(i -> i.getArgument(0));
-            service.uploadAttachment(5, file);
-            verify(attachments).save(argThat(a -> a.getUser().getUserId() == 1 && a.getIssue().getIssueId() == 5
-                    && a.getFilePath().equals("https://example.invalid/file.txt") && a.getUploadedAt() != null));
+        private final MockMultipartFile file=new MockMultipartFile("file","sample.txt","text/plain",new byte[]{1,2});
+        @BeforeEach void setup() {
+            lenient().when(issues.findById(5)).thenReturn(Optional.of(Fixtures.issue(5,10)));
+            lenient().when(projects.findByIdForUpdate(10)).thenReturn(Optional.of(Fixtures.project(10)));
+            lenient().when(users.findById(1)).thenReturn(Optional.of(Fixtures.user(1)));
+            lenient().when(attachments.saveAndFlush(any())).thenAnswer(inv->{IssueAttachment row=inv.getArgument(0);row.setAttachmentId(8);return row;});
         }
-        // Thiếu quyền upload phải chặn trước mọi lời gọi Cloudinary.
-        @Test void deniedUploadNeverCallsCloudinary() {
-            when(issues.findById(5)).thenReturn(Optional.of(Fixtures.issue(5, 10)));
-            assertThatThrownBy(() -> service.uploadAttachment(5, file)).hasMessageContaining("quyền");
-            verifyNoInteractions(cloud, attachments);
+        // Metadata và nội dung đều là dữ liệu local; không có dependency Cloudinary trong service.
+        @Test void uploadPersistsMetadataAndBytesForJwtOwner() {
+            var result=service.uploadAttachment(5,file);
+            assertThat(result.getFileName()).isEqualTo("sample.txt");assertThat(result.getFileSize()).isEqualTo(2L);assertThat(result.isDownloadAvailable()).isTrue();
+            verify(attachments).saveAndFlush(argThat(a->a.getUser().getUserId()==1&&"LOCAL_DB".equals(a.getStorageType())&&a.getCloudPublicId()==null));
+            verify(contents).saveAndFlush(argThat(c->c.getAttachment().getAttachmentId()==8&&java.util.Arrays.equals(c.getContent(),new byte[]{1,2})));
         }
-        // Cloudinary lỗi phải không lưu URL hoặc attachment giả.
-        @Test void cloudFailureDoesNotPersistAttachment() throws Exception {
-            when(issues.findById(5)).thenReturn(Optional.of(Fixtures.issue(5, 10)));
-            when(security.hasPermission(10, PermissionName.EDIT_ISSUE)).thenReturn(true);
-            when(cloud.uploadFile(file)).thenThrow(new IOException("network unavailable"));
-            assertThatThrownBy(() -> service.uploadAttachment(5, file)).hasMessageContaining("upload");
-            verifyNoInteractions(attachments);
+        @Test void deniedUploadNeverWrites() {
+            doThrow(new org.springframework.security.access.AccessDeniedException("quyền")).when(security).requirePermission(10,PermissionName.EDIT_ISSUE);
+            assertThatThrownBy(()->service.uploadAttachment(5,file)).hasMessageContaining("quyền");verifyNoInteractions(contents,attachments);
         }
-        // Người khác không có quyền EDIT_ISSUE không được xóa tệp của chủ sở hữu.
-        @Test void outsiderCannotDeleteAnotherUsersFile() {
-            var a = attachment(2); when(attachments.findById(8)).thenReturn(Optional.of(a));
-            assertThatThrownBy(() -> service.deleteAttachment(8)).hasMessageContaining("quyền");
-            verify(attachments, never()).delete(any()); verifyNoInteractions(cloud);
+        @Test void permissionRevokedWhileWaitingStopsUpload() {
+            doNothing().doThrow(new org.springframework.security.access.AccessDeniedException("revoked")).when(security).requirePermission(10,PermissionName.EDIT_ISSUE);
+            assertThatThrownBy(()->service.uploadAttachment(5,file)).hasMessageContaining("revoked");verifyNoInteractions(contents,attachments);
         }
-        // Người upload xóa đúng URL trước khi xóa metadata.
-        @Test void ownerDeletesRemoteFileThenMetadata() throws Exception {
-            var a = attachment(1); when(attachments.findById(8)).thenReturn(Optional.of(a));
-            service.deleteAttachment(8); var order = inOrder(cloud, attachments);
-            order.verify(cloud).deleteFile(a.getFilePath()); order.verify(attachments).delete(a);
+        @Test void invalidEmptyAndOversizedFilesStopBeforeWrite() {
+            assertThatThrownBy(()->service.uploadAttachment(5,new MockMultipartFile("file","empty.txt","text/plain",new byte[0]))).hasMessageContaining("rỗng");
+            assertThatThrownBy(()->service.uploadAttachment(5,new MockMultipartFile("file","large.txt","text/plain",new byte[10*1024*1024+1]))).hasMessageContaining("10 MiB");
+            verifyNoInteractions(contents,attachments);
         }
-        // Ghi nhận chính sách hiện có: xóa từ xa lỗi vẫn bỏ metadata; chưa có retry/bù tự động.
-        @Test void remoteDeletionFailureStillRemovesMetadataUnderCurrentPolicy() throws Exception {
-            var a = attachment(1); when(attachments.findById(8)).thenReturn(Optional.of(a));
-            doThrow(new IOException("storage unavailable")).when(cloud).deleteFile(a.getFilePath());
-            service.deleteAttachment(8); verify(attachments).delete(a);
+        @Test void ownerStillNeedsViewPermission() {
+            when(attachments.findById(8)).thenReturn(Optional.of(attachment(1)));
+            doThrow(new org.springframework.security.access.AccessDeniedException("no view")).when(security).requirePermission(10,PermissionName.VIEW_PROJECT);
+            assertThatThrownBy(()->service.deleteAttachment(8)).hasMessageContaining("no view");verifyNoInteractions(contents);verify(attachments,never()).delete(any());
         }
-        // Đọc tệp chỉ lấy bản ghi thuộc issue đã được cấp quyền xem.
-        @Test void listAttachmentsChecksProjectPermission() {
-            when(issues.findById(5)).thenReturn(Optional.of(Fixtures.issue(5, 10)));
-            when(security.hasPermission(10, PermissionName.VIEW_PROJECT)).thenReturn(true);
-            assertThat(service.getAttachments(5)).isEmpty(); verify(attachments).findByIssue_IssueIdOrderByUploadedAtAsc(5);
+        @Test void nullableOwnerNeedsEditorPermission() {
+            var row=attachment(1);row.setUser(null);when(attachments.findById(8)).thenReturn(Optional.of(row));
+            lenient().doThrow(new org.springframework.security.access.AccessDeniedException("no edit")).when(security).requirePermission(10,PermissionName.EDIT_ISSUE);
+            assertThatThrownBy(()->service.deleteAttachment(8)).hasMessageContaining("no edit");verifyNoInteractions(contents);
+        }
+        @Test void deleteRemovesBytesBeforeMetadata() {
+            var row=attachment(1);when(attachments.findById(8)).thenReturn(Optional.of(row));
+            service.deleteAttachmentForIssue(5,8);var order=inOrder(contents,attachments);
+            order.verify(contents).deleteForAttachment(8);order.verify(attachments).delete(row);
+        }
+        @Test void wrongParentStopsBeforeBinaryReadOrDelete() {
+            when(attachments.findById(8)).thenReturn(Optional.of(attachment(1)));
+            assertThatThrownBy(()->service.deleteAttachmentForIssue(99,8)).hasMessageContaining("không thuộc");
+            assertThatThrownBy(()->service.download(99,8)).hasMessageContaining("không thuộc");verifyNoInteractions(contents);
+        }
+        @Test void downloadRequiresViewBeforeLoadingBytes() {
+            when(attachments.findById(8)).thenReturn(Optional.of(attachment(1)));
+            doThrow(new org.springframework.security.access.AccessDeniedException("no view")).when(security).requirePermission(10,PermissionName.VIEW_PROJECT);
+            assertThatThrownBy(()->service.download(5,8)).hasMessageContaining("no view");verifyNoInteractions(contents);
+        }
+        @Test void htmlClaimedAsImageStillDownloadsAsOctetStream() {
+            var row=attachment(1);row.setStorageType("LOCAL_DB");row.setFileName("unsafe.html");row.setContentType("image/png");when(attachments.findById(8)).thenReturn(Optional.of(row));
+            var data=new IssueAttachmentContent();data.setAttachment(row);data.setContent("<script>alert(1)</script>".getBytes(java.nio.charset.StandardCharsets.UTF_8));when(contents.findById(8)).thenReturn(Optional.of(data));
+            var result=service.download(5,8);assertThat(result.contentType()).isEqualTo("application/octet-stream");assertThat(result.content()).isEqualTo(data.getContent());
+        }
+        @Test void legacyRemoteUrlIsNotFetched() {
+            var row=attachment(1);row.setFilePath("https://example.invalid/legacy");when(attachments.findById(8)).thenReturn(Optional.of(row));
+            assertThatThrownBy(()->service.download(5,8)).hasMessageContaining("DB local");verifyNoInteractions(contents);
+        }
+        @Test void listDoesNotLoadBinaryContents() {
+            assertThat(service.getAttachments(5)).isEmpty();verify(security).requirePermission(10,PermissionName.VIEW_PROJECT);
+            verify(attachments).findByIssue_IssueIdOrderByUploadedAtAsc(5);verifyNoInteractions(contents);
         }
         private IssueAttachment attachment(int owner) {
-            var a = new IssueAttachment(); a.setAttachmentId(8); a.setUser(Fixtures.user(owner));
-            a.setIssue(Fixtures.issue(5, 10)); a.setFilePath("https://example.invalid/file.txt"); return a;
+            var a=new IssueAttachment();a.setAttachmentId(8);a.setUser(Fixtures.user(owner));a.setIssue(Fixtures.issue(5,10));return a;
         }
     }
     @Nested @ExtendWith(MockitoExtension.class)

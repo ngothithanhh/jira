@@ -90,7 +90,7 @@ class PostgresRegressionIT {
             SprintMetricsService.class, ScrumReportService.class, AccountManagementService.class,
             ProjectMemberServiceImpl.class, UserRoleServiceImpl.class, com.example.jira.security.GlobalSecurity.class,
             com.example.jira.security.CustomUserDetailsService.class, IssueCommentServiceImpl.class,
-            NotificationInboxService.class, AdminQueryService.class, DatabaseSeeder.class})
+            NotificationInboxService.class, AdminQueryService.class, DatabaseSeeder.class, IssueAttachmentServiceImpl.class})
     static class Config {
         // Cleanup container chạy khi context đóng; local cluster do script dừng sau khi Maven kết thúc.
         @Bean org.springframework.beans.factory.DisposableBean postgresCleanup() {
@@ -109,6 +109,9 @@ class PostgresRegressionIT {
     }
     @MockBean ProjectSecurity security;
     @MockBean NotificationService notifications;
+    @Autowired IssueAttachmentContentRepository attachmentContentRows;
+    @Autowired IssueAttachmentServiceImpl attachmentService;
+    @Autowired IssueAttachmentRepository attachmentRows;
     @Autowired JdbcTemplate jdbc;
     @Autowired PlatformTransactionManager manager;
     @Autowired EntityManager em;
@@ -948,6 +951,42 @@ class PostgresRegressionIT {
     private UserRole makeAdmin(User user) {
         UserRole role=roleRows.findByRoleName("SYSTEM_ADMIN").orElseGet(() -> roleRows.saveAndFlush(Fixtures.role(0,"SYSTEM_ADMIN")));
         var assignment=new UserRoleAssignment(); assignment.setId(new UserRoleAssignmentId(user.getUserId(),role.getRoleId())); assignment.setUser(user); assignment.setRole(role); assignment.setAssignedAt(java.time.LocalDateTime.now()); roleAssignments.saveAndFlush(assignment); return role;
+    }
+    // Migration lặp giữ dữ liệu cũ; bytea mới lưu và tải lại đúng byte, không dùng Cloudinary hoặc file ngoài DB.
+    @Test void attachmentMetadataMigrationAndLocalUploadPreserveLegacyValues() throws Exception {
+        Issue issue=persistedIssue();
+        var legacy=new IssueAttachment();legacy.setIssue(issue);legacy.setUser(caller);legacy.setFilePath("https://example.invalid/legacy");attachmentRows.saveAndFlush(legacy);
+        for(String name:List.of("007_attachment_metadata.sql","008_attachment_local_content.sql")){
+            String sql=java.nio.file.Files.readString(java.nio.file.Path.of("scripts/migrations/"+name));jdbc.execute(sql);jdbc.execute(sql);
+        }
+        assertThat(attachmentRows.findById(legacy.getAttachmentId()).orElseThrow().getFileName()).isNull();
+        var file=new org.springframework.mock.web.MockMultipartFile("file","tài liệu.txt","text/plain",new byte[]{1,2,3});
+        var response=attachmentService.uploadAttachment(issue.getIssueId(),file);
+        var saved=attachmentRows.findById(response.getAttachmentId()).orElseThrow();
+        assertThat(saved.getFileName()).isEqualTo("tài liệu.txt");assertThat(saved.getFileSize()).isEqualTo(3L);
+        assertThat(saved.getStorageType()).isEqualTo("LOCAL_DB");assertThat(attachmentContentRows.count()).isEqualTo(1);
+        assertThat(attachmentService.download(issue.getIssueId(),saved.getAttachmentId()).content()).isEqualTo(new byte[]{1,2,3});
+    }
+    // Ném lỗi sau khi xóa content trong outer transaction: cả metadata lẫn bytea phải còn nguyên sau rollback.
+    @Test void attachmentDeleteRollbackRestoresBothMetadataAndBytes() {
+        var issue=persistedIssue();var file=new org.springframework.mock.web.MockMultipartFile("file","a.txt","text/plain",new byte[]{1});
+        var saved=attachmentService.uploadAttachment(issue.getIssueId(),file);
+        assertThatThrownBy(()->tx(()->{attachmentService.deleteAttachment(saved.getAttachmentId());throw new IllegalStateException("rollback delete");})).hasMessageContaining("rollback delete");
+        assertThat(attachmentRows.findById(saved.getAttachmentId())).isPresent();assertThat(attachmentContentRows.count()).isEqualTo(1);
+        assertThat(attachmentService.download(issue.getIssueId(),saved.getAttachmentId()).content()).isEqualTo(new byte[]{1});
+    }
+    // Rollback sau upload không để lại metadata hoặc nội dung rời; hai bảng cùng PostgreSQL transaction.
+    @Test void attachmentUploadRollbackRemovesBothRows() {
+        var issue=persistedIssue();var file=new org.springframework.mock.web.MockMultipartFile("file","a.txt","text/plain",new byte[]{1});
+        assertThatThrownBy(()->tx(()->{attachmentService.uploadAttachment(issue.getIssueId(),file);throw new IllegalStateException("rollback upload");})).hasMessageContaining("rollback upload");
+        assertThat(attachmentRows.count()).isZero();assertThat(attachmentContentRows.count()).isZero();
+    }
+    // Hai lượt xóa một file local: khóa project/refresh cho đúng một lượt thành công, cả hai bảng cuối cùng rỗng.
+    @Test void simultaneousLocalAttachmentDeletionKeepsRowsConsistent() throws Exception {
+        var issue=persistedIssue();var file=new org.springframework.mock.web.MockMultipartFile("file","a.txt","text/plain",new byte[]{1});
+        var saved=attachmentService.uploadAttachment(issue.getIssueId(),file);
+        var results=race(()->{Fixtures.login(caller.getUserId());try{return outcome(()->{attachmentService.deleteAttachment(saved.getAttachmentId());return true;});}finally{org.springframework.security.core.context.SecurityContextHolder.clearContext();}});
+        assertThat(results.stream().filter(r->r.failure()==null).count()).isEqualTo(1);assertThat(attachmentRows.count()).isZero();assertThat(attachmentContentRows.count()).isZero();
     }
     // Các helper chỉ tạo fixture đã commit trong DB test; không thay thuật toán production.
     private Sprint persistedSprint(SprintState state) {

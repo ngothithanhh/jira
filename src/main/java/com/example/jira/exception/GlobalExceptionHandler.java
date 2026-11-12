@@ -11,6 +11,11 @@ import org.springframework.web.server.ResponseStatusException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    /** Multipart vượt giới hạn thực của server trả413, không chuyển thành upload thành công hoặc lỗi500. */
+    @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiError> uploadTooLarge(org.springframework.web.multipart.MaxUploadSizeExceededException exception) {
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(ApiError.of(HttpStatus.PAYLOAD_TOO_LARGE,"Tệp tối đa 10 MiB"));
+    }
     /** Entity bị xóa lúc request chờ khóa/refresh: trả 404 thay vì tạo lại dữ liệu hoặc lộ lỗi Hibernate. */
     @ExceptionHandler(jakarta.persistence.EntityNotFoundException.class)
     public ResponseEntity<ApiError> disappeared(jakarta.persistence.EntityNotFoundException exception) {

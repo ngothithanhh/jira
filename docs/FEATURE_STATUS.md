@@ -9,7 +9,7 @@ Cập nhật ngày 12/11/2026. Đây là tình trạng mã nguồn và kiểm th
 | 3 | Quản lý project | Tạo/xem/sửa/xóa, lọc quyền đọc, lead, issue counter | Project tests và full HTTP create/read; xóa khi còn dữ liệu liên kết có thể 409, không tự xóa cây |
 | 4 | Quản lý thành viên project | Thêm/gỡ/xem, đổi role, một PM, audit/notification trong transaction | PostgreSQL PM đồng thời/invitation rollback, HTTP thêm member; lead không gỡ trực tiếp |
 | 5 | Quản lý issue | Tạo/chi tiết/sửa/assign/status/xóa, parent issue, version và key không tái dùng | Unit/DB/full HTTP; không tự xóa con/attachment, xóa vật lý có thể ảnh hưởng thống kê current |
-| 6 | Quản lý comment và attachment | Comment CRUD/version/ownership, attachment upload/list/delete hiện có | Comment có DB/race/full HTTP; Cloudinary chỉ mock SDK, chính sách cũ xóa metadata kể cả remote delete lỗi chưa có retry/outbox |
+| 6 | Quản lý comment và attachment | Comment CRUD/version/ownership; attachment upload/list/download/delete bằng PostgreSQL local | Metadata/bytea cùng transaction, rollback/race và browser thật; file tối đa10MiB, legacy URL không tự chuyển local; xem ATTACHMENTS_LOCAL_API.md |
 | 7 | Quản lý issue type | CRUD chung, gán/gỡ/default theo project, response có issueTypeId | Configuration/mapper/full HTTP; cấu hình default legacy chưa được bảo đảm unique ở DB |
 | 8 | Quản lý status và workflow | CRUD status, rule chuyển, allowed transition, chuyển status có lịch sử/notification | Configuration/Issue tests và HTTP move dùng workflow thật; chưa phải workflow tùy chỉnh nhiều scheme như Jira |
 | 9 | Quản lý role và permission | CRUD role/permission, role-permission, global user-role và project member role | Admin toàn cục tách membership; last-admin/reserved role/race PostgreSQL |
@@ -33,7 +33,7 @@ Full app smoke dùng SpringBootTest, cổng loopback ngẫu nhiên, PostgreSQL s
 ## Những phần không được coi là đã hoàn thiện
 
 - Không có mã nguồn FE trong checkout, chưa kiểm tương tác trình duyệt hoặc giao diện biểu đồ.
-- Chưa có kiểm chứng Cloudinary/SMTP/Redis thật, load benchmark hoặc mọi cách xen kẽ request đồng thời.
+- Attachment mới dùng PostgreSQL local, không cần Cloudinary. Chưa có kiểm chứng SMTP/Redis thật, load benchmark hoặc mọi cách xen kẽ request đồng thời.
 - Tính năng mở rộng như worklog API, release/version API, label/component, due date, hierarchy Epic riêng, bulk move, thông báo realtime và password recovery qua email chưa được bổ sung trong tám đợt. Entity của một số mục đã có nhưng không đồng nghĩa có API hoàn chỉnh.
 - Migration triển khai chưa chạy trên DB người dùng trong đợt code/test. Script 001..006 đã có, cần backup và áp dụng đúng thứ tự trước chạy bản mới. Repo chưa có baseline SQL đầy đủ cho các bảng cũ; xem RUN_AND_MIGRATE.md.
 - Một số API cũ vẫn dùng RuntimeException và validation chưa đồng nhất; chưa kết luận mọi input sai đều có lỗi HTTP chuẩn. Chưa mở rộng thành đợt chuẩn hóa tất cả API cũ.

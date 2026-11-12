@@ -12,4 +12,8 @@ public class IssueAttachmentResponse {
     private int uploadedByUserId;
     private String uploadedByUserName;
     private LocalDateTime uploadedAt;
+    private String fileName;
+    private String contentType;
+    private Long fileSize;
+    private boolean downloadAvailable;
 }

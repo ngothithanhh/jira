@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.util.Map;
 
 @Service
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name="app.storage.cloudinary-enabled", havingValue="true")
 @RequiredArgsConstructor
 public class CloudinaryServiceImpl implements CloudinaryService {
 
