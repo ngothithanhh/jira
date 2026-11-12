@@ -161,18 +161,25 @@ class ProjectRegressionTest {
         // Gỡ thành viên chỉ xóa cặp project/user được yêu cầu.
         @Test void removeUsesCompositeIdAndRecordsAudit() {
             when(security.hasPermission(10, PermissionName.DELETE_MEMBER)).thenReturn(true);
+            when(members.existsById(new ProjectMemberId(10, 2))).thenReturn(true);
             service.removeMember(10, 2); verify(members).deleteById(new ProjectMemberId(10, 2));
             verify(audit).logAction(eq("REMOVE_MEMBER"), eq(EntityType.PROJECT), eq(10), contains("2"));
         }
+        @Test void missingMembershipDoesNotProduceAudit() {
+            when(security.hasPermission(10, PermissionName.DELETE_MEMBER)).thenReturn(true);
+            assertThatThrownBy(() -> service.removeMember(10, 2)).isInstanceOf(com.example.jira.exception.NotFoundException.class);
+            verify(members, never()).deleteById(any());
+            verifyNoInteractions(audit);
+        }
         // BUG-008: người ngoài không được đọc danh sách thành viên dự án.
         @Test void outsiderCannotListMembers() {
+            when(projects.existsById(10)).thenReturn(true);
             assertThatThrownBy(() -> service.getMembers(10)).isInstanceOf(RuntimeException.class);
             verifyNoInteractions(members);
         }
         // Cấu hình dữ liệu đọc của addMember; chưa ghi DB thật ở unit test.
         private void prepareAdd(String role) {
             when(security.hasPermission(10, PermissionName.ADD_MEMBER)).thenReturn(true);
-            when(projects.findById(10)).thenReturn(Optional.of(Fixtures.project(10)));
             when(users.findById(2)).thenReturn(Optional.of(Fixtures.user(2)));
             when(roles.findByRoleId(7)).thenReturn(Optional.of(Fixtures.role(7, role)));
         }
