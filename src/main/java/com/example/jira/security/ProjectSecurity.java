@@ -46,6 +46,9 @@ public class ProjectSecurity {
             return true;
         }
 
+        // Xóa project là quyền của chủ/lead và SYSTEM_ADMIN, không thể cấp cho thành viên bằng grant legacy.
+        if (permission == PermissionName.DELETE_PROJECT) return false;
+
         Optional<ProjectMember> memberOpt = projectMemberRepository.findByProject_ProjectIdAndUser_UserId(projectId, userId);
         
         if (memberOpt.isEmpty()) {

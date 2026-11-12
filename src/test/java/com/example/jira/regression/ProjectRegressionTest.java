@@ -32,18 +32,20 @@ class ProjectRegressionTest {
         @Mock ProjectSecurity security;
         @Mock AuditLogService audit;
         @Mock ProjectStatsRepository stats;
+        @Mock UserRoleRepository roles; @Mock ProjectMemberRepository members; @Mock jakarta.persistence.EntityManager entityManager;
+        @BeforeEach void actor(){lenient().when(global.currentUserId()).thenReturn(1);lenient().when(roles.findByRoleName("PROJECT_MANAGER")).thenReturn(Optional.of(Fixtures.role(2,"PROJECT_MANAGER")));}
         @InjectMocks ProjectServiceImpl service;
         // Tạo project lấy lead từ user đang đăng nhập, không từ request của client.
         @Test void createUsesAuthenticatedLead() {
-            when(users.findById(1)).thenReturn(Optional.of(Fixtures.user(1)));
+            when(users.findByIdForUpdate(1)).thenReturn(Optional.of(Fixtures.user(1)));
             when(global.hasPermission(PermissionName.CREATE_PROJECT)).thenReturn(true);
             var r = new CreateProjectRequest(); r.setProjectKey("TEAM"); r.setProjectName("Team");
             assertThat(service.createProject(r).getProjectKey()).isEqualTo("TEAM");
-            verify(projects).save(argThat(p -> p.getLead().getUserId() == 1 && p.getCreatedAt() != null));
+            verify(projects).saveAndFlush(argThat(p -> p.getLead().getUserId() == 1 && p.getCreatedAt() != null));
         }
         // Project key trùng phải dừng trước save.
         @Test void duplicateProjectKeyDoesNotWrite() {
-            when(users.findById(1)).thenReturn(Optional.of(Fixtures.user(1)));
+            when(users.findByIdForUpdate(1)).thenReturn(Optional.of(Fixtures.user(1)));
             when(global.hasPermission(PermissionName.CREATE_PROJECT)).thenReturn(true);
             when(projects.existsByProjectKey("TEAM")).thenReturn(true);
             var r = new CreateProjectRequest(); r.setProjectKey("TEAM"); r.setProjectName("Team");
@@ -51,7 +53,7 @@ class ProjectRegressionTest {
         }
         // Không có quyền tạo không được lưu project.
         @Test void deniedCreateDoesNotWrite() {
-            when(users.findById(1)).thenReturn(Optional.of(Fixtures.user(1)));
+            when(users.findByIdForUpdate(1)).thenReturn(Optional.of(Fixtures.user(1)));
             assertThatThrownBy(() -> service.createProject(new CreateProjectRequest())).hasMessageContaining("quyền");
             verify(projects, never()).save(any());
         }
@@ -63,15 +65,16 @@ class ProjectRegressionTest {
             service.updateProject(10, r); assertThat(p.getProjectName()).isEqualTo("Changed");
             assertThat(p.getProjectKey()).isEqualTo("P10"); assertThat(p.getLead().getUserId()).isEqualTo(99);
         }
-        // Xóa project cần quyền toàn cục; thiếu quyền không ghi audit giả.
+        // Xóa project cần quyền chủ/SYSTEM_ADMIN; thiếu quyền không ghi audit giả.
         @Test void deniedDeleteDoesNotWrite() {
+            when(projects.findByIdForUpdate(10)).thenReturn(Optional.of(Fixtures.project(10)));
             assertThatThrownBy(() -> service.deleteProject(10)).hasMessageContaining("quyền");
             verify(projects, never()).delete(any()); verifyNoInteractions(audit);
         }
         // Xóa thành công ghi audit đúng project ID.
         @Test void deletionRecordsAudit() {
-            var p = Fixtures.project(10); when(projects.findById(10)).thenReturn(Optional.of(p));
-            when(global.hasPermission(PermissionName.DELETE_PROJECT)).thenReturn(true);
+            var p = Fixtures.project(10); when(projects.findByIdForUpdate(10)).thenReturn(Optional.of(p));
+            when(security.hasPermission(10,PermissionName.DELETE_PROJECT)).thenReturn(true);
             service.deleteProject(10); verify(projects).delete(p);
             verify(audit).logAction(eq("DELETE"), eq(EntityType.PROJECT), eq(10), contains("P10"));
         }
@@ -92,7 +95,7 @@ class ProjectRegressionTest {
         }
         // Tên rỗng bị từ chối trước lưu, không dựa vào NOT NULL vì chuỗi trắng vẫn được DB chấp nhận.
         @Test void createRejectsBlankNameBeforeSave() {
-            when(users.findById(1)).thenReturn(Optional.of(Fixtures.user(1)));
+            when(users.findByIdForUpdate(1)).thenReturn(Optional.of(Fixtures.user(1)));
             when(global.hasPermission(PermissionName.CREATE_PROJECT)).thenReturn(true);
             var r = new CreateProjectRequest(); r.setProjectKey("TEAM"); r.setProjectName("  ");
             assertThatThrownBy(() -> service.createProject(r)).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);

@@ -1,68 +1,42 @@
 package com.example.jira.service.impl;
-
-import com.example.jira.entity.Permission;
-import com.example.jira.entity.RolePermission;
-import com.example.jira.entity.RolePermissionId;
-import com.example.jira.entity.UserRole;
-import com.example.jira.repository.PermissionRepository;
-import com.example.jira.repository.RolePermissionRepository;
-import com.example.jira.repository.UserRoleRepository;
-import com.example.jira.service.RolePermissionService;
-import com.example.jira.security.GlobalSecurity;
-import com.example.jira.exception.NotFoundException;
-import com.example.jira.exception.ConflictException;
-import org.springframework.security.access.AccessDeniedException;
+import com.example.jira.entity.*;
+import com.example.jira.repository.*;
+import com.example.jira.service.*;
+import com.example.jira.security.*;
+import com.example.jira.enums.EntityType;
+import com.example.jira.exception.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-@Service
-@RequiredArgsConstructor
+@Service @RequiredArgsConstructor @Transactional
 public class RolePermissionServiceImpl implements RolePermissionService {
-    private final GlobalSecurity globalSecurity;
-    private final UserRoleRepository userRoleRepository;
+    private final AdminRoleLock adminLock;
     private final PermissionRepository permissionRepository;
     private final RolePermissionRepository rolePermissionRepository;
+    private final AuditLogService audit;
 
-    /**
-     * Dùng khi admin sửa cấu hình toàn hệ thống. roleId thuộc user_roles, permissionId thuộc permissions; thêm đúng cặp vào role_permissions sau khi kiểm trùng.
-     * Người gọi phải có SYSTEM_ADMIN trong user_role_assignments; thiếu quyền thì 403 trước mọi đọc/ghi nghiệp vụ.
-     */
-    @Override
-    public void addPermissionToRole(int roleId, int permissionId){
-        // Chặn user thường trước khi tra ID mục tiêu; biết ID role/quyền không cho phép tự nâng quyền.
-        globalSecurity.assertSystemAdmin();
-        UserRole userRole = userRoleRepository.findByRoleId(roleId).orElseThrow(()->new NotFoundException("Không tìm thấy vai trò!"));
-
-        Permission permission = permissionRepository.findById(permissionId).orElseThrow(()->new NotFoundException("Không tìm thấy quyền!"));
-
-        RolePermissionId id = new RolePermissionId(roleId,permissionId);
-
-        if(rolePermissionRepository.existsById(id)){
-            throw new ConflictException("Quyền đã được gán!");
-        }
-
-        RolePermission rolePermission = new RolePermission();
-        rolePermission.setId(id);
-        rolePermission.setRole(userRole);
-        rolePermission.setPermission(permission);
-
-        rolePermissionRepository.save(rolePermission);
+    /** API grant cũ: roleId thuộc user_roles, permissionId thuộc permissions; khóa/recheck actor và role trước kiểm phạm vi. */
+    @Override public void addPermissionToRole(int roleId,int permissionId){
+        adminLock.begin();var role=adminLock.target(roleId);
+        var permission=permissionRepository.findById(permissionId).orElseThrow(()->new NotFoundException("Không tìm thấy quyền"));
+        RolePolicy.projectGrant(role.getRoleName(),permission.getPermissionName());
+        // Không tự chọn giữa các bản ghi permission alias; danh mục sai phải được kiểm tra trước cấp quyền.
+        if(permissionRepository.findAll().stream().filter(p->RolePolicy.canonical(p.getPermissionName()).equals(permission.getPermissionName())).count()!=1)
+            throw new ConflictException("Danh mục quyền có mã trùng");
+        var id=new RolePermissionId(roleId,permissionId);
+        if(rolePermissionRepository.existsById(id))throw new ConflictException("Quyền đã được gán");
+        var grant=new RolePermission();grant.setId(id);grant.setRole(role);grant.setPermission(permission);
+        rolePermissionRepository.saveAndFlush(grant);
+        audit.logAction("GRANT_ROLE_PERMISSION",EntityType.ROLE,roleId,"Thêm quyền ID "+permissionId);
     }
-
-    /**
-     * Dùng khi admin sửa cấu hình toàn hệ thống. roleId/permissionId là cặp role_permissions cần gỡ, không xóa role hoặc permission gốc.
-     * Người gọi phải có SYSTEM_ADMIN trong user_role_assignments; thiếu quyền thì 403 trước mọi đọc/ghi nghiệp vụ.
-     */
-    @Override
-    public void removePermissionToRole(int roleId, int permissionId){
-        // Chặn user thường trước khi tra ID mục tiêu; biết ID role/quyền không cho phép tự nâng quyền.
-        globalSecurity.assertSystemAdmin();
-        
-        RolePermission rolePermission = rolePermissionRepository.findByRole_RoleIdAndPermission_PermissionId(roleId, permissionId).orElseThrow(()->new NotFoundException("Không tìm thấy quyền trong vai trò!"));
-
-        rolePermissionRepository.delete(rolePermission);
-
+    /** Gỡ đúng cặp kể cả grant legacy sai phạm vi; SYSTEM_ADMIN luôn toàn quyền nên không cho sửa cấu hình giả hiệu lực. */
+    @Override public void removePermissionToRole(int roleId,int permissionId){
+        adminLock.begin();var role=adminLock.target(roleId);
+        if(RolePolicy.system(role.getRoleName()))throw new ConflictException("SYSTEM_ADMIN luôn toàn quyền");
+        var grant=rolePermissionRepository.findByRole_RoleIdAndPermission_PermissionId(roleId,permissionId)
+            .orElseThrow(()->new NotFoundException("Không tìm thấy quyền trong vai trò"));
+        rolePermissionRepository.delete(grant);rolePermissionRepository.flush();
+        audit.logAction("REVOKE_ROLE_PERMISSION",EntityType.ROLE,roleId,"Gỡ quyền ID "+permissionId);
     }
-
-
 }

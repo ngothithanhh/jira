@@ -8,5 +8,6 @@ public enum EntityType {
     BOARD,
     COMMENT,
     ATTACHMENT,
-    WORKLOG
+    WORKLOG,
+    ROLE
 }

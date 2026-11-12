@@ -1,88 +1,78 @@
 package com.example.jira.service.impl;
 
-import com.example.jira.dto.user_role.UserRoleRequest;
-import com.example.jira.dto.user_role.UserRoleResponse;
+import com.example.jira.dto.user_role.*;
 import com.example.jira.entity.UserRole;
 import com.example.jira.mapper.UserRoleMapper;
-import com.example.jira.repository.ProjectMemberRepository;
-import com.example.jira.repository.UserRoleAssignmentRepository;
-import com.example.jira.repository.UserRoleRepository;
-import com.example.jira.service.UserRoleService;
-import com.example.jira.service.UserService;
-import com.example.jira.security.GlobalSecurity;
-import com.example.jira.exception.NotFoundException;
+import com.example.jira.repository.*;
+import com.example.jira.service.*;
+import com.example.jira.security.*;
+import com.example.jira.enums.EntityType;
 import com.example.jira.exception.ConflictException;
-import org.springframework.security.access.AccessDeniedException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-
+import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 
-@Service
-@RequiredArgsConstructor
+@Service @RequiredArgsConstructor @Transactional
 public class UserRoleServiceImpl implements UserRoleService {
-    private final GlobalSecurity globalSecurity;
-
+    private final AdminRoleLock adminLock;
     private final UserRoleRepository userRoleRepository;
     private final UserRoleAssignmentRepository userRoleAssignmentRepository;
     private final ProjectMemberRepository projectMemberRepository;
+    private final RolePermissionRepository grants;
+    private final AuditLogService audit;
 
-    @Override
+    /** Danh mục cũ giữ nguyên DTO role/roleName cho trang thành viên; chỉ đọc, không thay tên legacy. */
+    @Override @Transactional(readOnly=true)
     public List<UserRoleResponse> getAllUserRoles(){
-        return userRoleRepository.findAll()
-                .stream().map(UserRoleMapper::toResponse).toList();
+        return userRoleRepository.findAll().stream().map(UserRoleMapper::toResponse).toList();
+    }
+
+    /** Admin tạo mã role dự án; khóa/recheck actor rồi chuẩn hóa, kiểm trùng trước lưu role và audit cùng transaction. */
+    @Override public UserRoleResponse createRole(UserRoleRequest request){
+        adminLock.begin();
+        String name=RolePolicy.roleName(request==null?null:request.getRoleName());
+        checkName(name,0);
+        var role=new UserRole();role.setRoleName(name);
+        role=userRoleRepository.saveAndFlush(role);
+        audit.logAction("CREATE_ROLE",EntityType.ROLE,role.getRoleId(),"Tạo vai trò "+name);
+        return UserRoleMapper.toResponse(role);
+    }
+
+    /** roleId từ hàng user_roles đã chọn; đổi tên custom giữ nguyên ID, membership và quyền, không gán lại người dùng. */
+    @Override public UserRoleResponse updateRole(int roleId,UserRoleRequest request){
+        adminLock.begin();
+        var role=adminLock.target(roleId);
+        // Giữ bốn tên seed; chặn cả tên nguồn và tên đích để không biến custom thành role được guard đặc biệt.
+        if(RolePolicy.reserved(role.getRoleName()))throw new ConflictException("Không đổi tên vai trò mặc định");
+        String name=RolePolicy.roleName(request==null?null:request.getRoleName());
+        checkName(name,roleId);
+        // Cùng tên chuẩn hiện có là no-op, không lưu hoặc tạo audit thay đổi giả.
+        if(name.equals(role.getRoleName()))return UserRoleMapper.toResponse(role);
+        String previous=role.getRoleName();role.setRoleName(name);
+        role=userRoleRepository.saveAndFlush(role);
+        audit.logAction("UPDATE_ROLE",EntityType.ROLE,roleId,"Đổi vai trò "+previous+" thành "+name);
+        return UserRoleMapper.toResponse(role);
     }
 
     /**
-     * Dùng khi admin sửa cấu hình toàn hệ thống. Tạo user_roles từ tên role trong request; không tạo user_role_assignments cho người gọi.
-     * Người gọi phải có SYSTEM_ADMIN trong user_role_assignments; thiếu quyền thì 403 trước mọi đọc/ghi nghiệp vụ.
+     * Xóa custom chưa gán cho ai: khóa actor/role, kiểm hai bảng tham chiếu rồi xóa grants của chính role đó.
+     * FK vẫn chặn membership được gán xen kẽ; lỗi flush rollback cả grants, role và audit, không cascade người dùng.
      */
-    @Override
-    public UserRoleResponse createRole(UserRoleRequest request){
-        // Chặn user thường trước khi tra ID mục tiêu; biết ID role/quyền không cho phép tự nâng quyền.
-        globalSecurity.assertSystemAdmin();
-
-        // SYSTEM_ADMIN được seeder tạo và dùng làm khóa quản trị; không tạo bản sao khác chữ hoa/thường qua API.
-        if ("SYSTEM_ADMIN".equalsIgnoreCase(request.getRoleName())) throw new ConflictException("SYSTEM_ADMIN là vai trò dành riêng");
-        if(userRoleRepository.existsByRoleName(request.getRoleName()))
-            throw new ConflictException("Vai trò đã tồn tại!");
-
-        UserRole userRole = new UserRole();
-        userRole.setRoleName(request.getRoleName());
-
-        return UserRoleMapper.toResponse(userRoleRepository.save(userRole));
+    @Override public void deleteRole(int roleId){
+        adminLock.begin();
+        var role=adminLock.target(roleId);
+        if(RolePolicy.reserved(role.getRoleName()))throw new ConflictException("Không xóa vai trò mặc định");
+        if(userRoleAssignmentRepository.existsByRole_RoleId(roleId)||projectMemberRepository.existsByRole_RoleId(roleId))
+            throw new ConflictException("Vai trò đang được gán cho người dùng hoặc dự án");
+        grants.deleteForRole(roleId);
+        userRoleRepository.delete(role);userRoleRepository.flush();
+        audit.logAction("DELETE_ROLE",EntityType.ROLE,roleId,"Xóa vai trò "+role.getRoleName());
     }
 
-    /**
-     * Dùng khi admin sửa cấu hình toàn hệ thống. roleId là ID user_roles cần đổi tên, không phải role của người đang đăng nhập.
-     * Người gọi phải có SYSTEM_ADMIN trong user_role_assignments; thiếu quyền thì 403 trước mọi đọc/ghi nghiệp vụ.
-     */
-    @Override
-    public UserRoleResponse updateRole(int roleId, UserRoleRequest request){
-        // Chặn user thường trước khi tra ID mục tiêu; biết ID role/quyền không cho phép tự nâng quyền.
-        globalSecurity.assertSystemAdmin();
-        UserRole userRole = userRoleRepository.findByRoleId(roleId).orElseThrow(()->new NotFoundException("Không tìm thấy vai trò!"));
-
-        // Không đổi vai trò khác thành admin hoặc đổi mất tên admin đang bảo vệ last-admin/khóa quản trị.
-        if ("SYSTEM_ADMIN".equalsIgnoreCase(userRole.getRoleName()) || "SYSTEM_ADMIN".equalsIgnoreCase(request.getRoleName())) throw new ConflictException("Không đổi tên vai trò SYSTEM_ADMIN");
-        userRole.setRoleName(request.getRoleName());
-
-        return UserRoleMapper.toResponse(userRoleRepository.save(userRole));
-    }
-
-    /**
-     * Dùng khi admin sửa cấu hình toàn hệ thống. roleId là ID user_roles cần xóa; giữ lại kiểm tra tham chiếu toàn cục và project trước khi xóa.
-     * Người gọi phải có SYSTEM_ADMIN trong user_role_assignments; thiếu quyền thì 403 trước mọi đọc/ghi nghiệp vụ.
-     */
-    @Override
-    public void deleteRole(int roleId){
-        // Chặn user thường trước khi tra ID mục tiêu; biết ID role/quyền không cho phép tự nâng quyền.
-        globalSecurity.assertSystemAdmin();
-        if (userRoleRepository.findByRoleId(roleId).filter(role -> "SYSTEM_ADMIN".equalsIgnoreCase(role.getRoleName())).isPresent()) throw new ConflictException("Không xóa vai trò SYSTEM_ADMIN");
-        if (userRoleAssignmentRepository.existsByRole_RoleId(roleId) || projectMemberRepository.existsByRole_RoleId(roleId)) {
-            throw new ConflictException("Không thể xóa vai trò này vì đang được gán cho người dùng hoặc dự án!");
-        }
-        
-        userRoleRepository.deleteById(roleId);
+    /** Tên canonical của role khác đã tồn tại hoặc là tên seed thì409; không tự sửa dữ liệu legacy. */
+    private void checkName(String name,int excluded){
+        if(RolePolicy.reserved(name))throw new ConflictException("Tên vai trò mặc định được dành riêng");
+        if(userRoleRepository.canonicalExists(name,excluded))throw new ConflictException("Vai trò đã tồn tại");
     }
 }

@@ -73,6 +73,9 @@ public class AccountManagementService {
     @Transactional
     public void grantRole(int userId,int roleId) {
         User target = adminTarget(userId); UserRole role = role(roleId); var id = new UserRoleAssignmentId(userId,roleId);
+        // Chỉ cấp SYSTEM_ADMIN ở user_role_assignments. Role khác phải gán trong thành viên của từng dự án.
+        // Kiểm trước nhánh no-op để request gán legacy cũng không được coi là thao tác hợp lệ.
+        if (!"SYSTEM_ADMIN".equalsIgnoreCase(role.getRoleName())) throw error(HttpStatus.BAD_REQUEST,"Vai trò này chỉ được gán trong dự án");
         if (assignments.existsById(id)) return;
         var assignment = new UserRoleAssignment(); assignment.setId(id); assignment.setUser(target); assignment.setRole(role); assignment.setAssignedAt(LocalDateTime.now()); assignments.save(assignment);
         audit.logAction("GRANT_ROLE",EntityType.USER,userId,"Gán role ID " + roleId);

@@ -65,8 +65,8 @@ class SecurityRegressionTest {
         @Mock UserRoleAssignmentRepository assignments;
         @Mock RolePermissionRepository grants;
         @InjectMocks GlobalSecurity service;
-        // Không có vai trò toàn cục thì không được CREATE_PROJECT.
-        @Test void noGlobalRoleIsDenied() { assertThat(service.hasPermission(PermissionName.CREATE_PROJECT)).isFalse(); }
+        // Không cần role toàn cục: người đã xác thực vẫn được tạo project của mình.
+        @Test void noGlobalRoleCanCreateOwnProject() { assertThat(service.hasPermission(PermissionName.CREATE_PROJECT)).isTrue(); }
         // Có một grant không biến role thường thành quản trị hệ thống.
         @Test void ordinaryRoleCannotAdministerSystem() {
             var assignment = new UserRoleAssignment(); assignment.setRole(Fixtures.role(7, "DEVELOPER"));
@@ -86,14 +86,12 @@ class SecurityRegressionTest {
             assertThatThrownBy(service::currentUserId).isInstanceOf(org.springframework.security.core.AuthenticationException.class);
             verifyNoInteractions(assignments, grants);
         }
-        // Duyệt các role toàn cục đến khi tìm đúng permission cần kiểm tra.
+        // SYSTEM_ADMIN vẫn được nhận diện khi đứng sau assignment legacy không phải admin.
         @Test void permissionCanComeFromSecondRole() {
             var a = new UserRoleAssignment(); a.setRole(Fixtures.role(7, "DEVELOPER"));
             var b = new UserRoleAssignment(); b.setRole(Fixtures.role(8, "SYSTEM_ADMIN"));
             when(assignments.findByUser_UserId(1)).thenReturn(List.of(a, b));
-            when(grants.existsByRole_RoleIdAndPermission_PermissionName(anyInt(), eq("CREATE_PROJECT")))
-                    .thenAnswer(inv -> (int) inv.getArgument(0) == 8);
-            assertThat(service.hasPermission(PermissionName.CREATE_PROJECT)).isTrue();
+            assertThat(service.hasPermission(PermissionName.DELETE_PROJECT)).isTrue();
         }
     }
     @Nested class Jwt {

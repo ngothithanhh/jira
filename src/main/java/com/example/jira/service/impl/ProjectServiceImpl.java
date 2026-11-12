@@ -42,13 +42,19 @@ public class ProjectServiceImpl implements ProjectService {
     private final ProjectSecurity projectSecurity;
     private final AuditLogService auditLogService;
     private final ProjectStatsRepository stats;
+    private final com.example.jira.repository.UserRoleRepository roles;
+    private final com.example.jira.repository.ProjectMemberRepository members;
+    private final jakarta.persistence.EntityManager entityManager;
 
-    /** Người gọi tạo dự án; ID lead lấy từ UserPrincipal và tra users. Kiểm CREATE_PROJECT trước khi lưu projects; trùng project_key thì 409. */
+    /** User đang hoạt động tự tạo dự án; lead lấy từ JWT, ghi project và membership PROJECT_MANAGER cùng transaction. */
     @Override
     @Transactional
     public ProjectSummary createProject(CreateProjectRequest request){
-        int userId = SecurityUtils.getCurrentUserId();
-        User user = userRepository.findById(userId).orElseThrow(()->new NotFoundException("Không tìm thấy người dùng!"));
+        int userId = globalSecurity.currentUserId();
+        // Khóa/refresh actor để tài khoản bị khóa trong lúc chờ không tạo project bằng trạng thái đã nạp cũ.
+        User user = userRepository.findByIdForUpdate(userId).orElseThrow(()->new NotFoundException("Không tìm thấy người dùng!"));
+        entityManager.refresh(user);
+        if (!user.isEnabled()) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"Tài khoản đã bị khóa");
 
         // Thiếu quyền trên bên sở hữu dữ liệu thì dừng bằng 403, không thực hiện các cập nhật bên dưới.
         if(!globalSecurity.hasPermission(PermissionName.CREATE_PROJECT))
@@ -63,6 +69,8 @@ public class ProjectServiceImpl implements ProjectService {
         if(projectRepository.existsByProjectKey(key)){
             throw new ConflictException("Khóa dự án đã tồn tại!");
         }
+        // Mã role cố định do seed cung cấp; thiếu cấu hình thì dừng, không lưu một project không có thành viên chủ.
+        var manager=roles.findByRoleName("PROJECT_MANAGER").orElseThrow(()->new ConflictException("Chưa có vai trò PROJECT_MANAGER"));
 
         Project project = new Project();
         project.setProjectName(request.getProjectName().trim());
@@ -71,9 +79,16 @@ public class ProjectServiceImpl implements ProjectService {
         project.setCreatedAt(LocalDateTime.now());
 
         project.setLead(user);
-        projectRepository.save(project);
-
-        return projectMapper.toResponse(project);
+        projectRepository.saveAndFlush(project);
+        // projectId vừa sinh và userId từ JWT tạo đúng membership chủ, không cấp role toàn hệ thống.
+        var membership=new com.example.jira.entity.ProjectMember();
+        membership.setId(new com.example.jira.entity.ProjectMemberId(project.getProjectId(),userId));
+        membership.setProject(project);membership.setUser(user);membership.setRole(manager);membership.setAssignedAt(LocalDateTime.now());
+        members.saveAndFlush(membership);
+        auditLogService.logAction("CREATE_PROJECT",EntityType.PROJECT,project.getProjectId(),"Tạo dự án: "+key);
+        var result=projectMapper.toResponse(project);
+        attachCounts(List.of(result));
+        return result;
 
     }
 
@@ -128,17 +143,21 @@ public class ProjectServiceImpl implements ProjectService {
         return result;
     }
 
-    /** id là ID projects cần xóa; giữ kiểm DELETE_PROJECT toàn cục, thiếu quyền thì 403. Xóa thành công mới ghi audit theo ID dự án. */
+    /** id thuộc projects cần xóa; khóa rồi kiểm lead/SYSTEM_ADMIN, dọn sole lead membership và xóa cùng audit trong transaction. */
     @Override
     @Transactional
     public void deleteProject(int id){
-        int userId = SecurityUtils.getCurrentUserId();
-
-        // Thiếu quyền trên bên sở hữu dữ liệu thì dừng bằng 403, không thực hiện các cập nhật bên dưới.
-        if(!globalSecurity.hasPermission(PermissionName.DELETE_PROJECT))
+        // Khóa đúng project rồi kiểm chủ/lead hoặc SYSTEM_ADMIN; role PM ở project khác không tạo quyền xóa.
+        Project project = projectRepository.findByIdForUpdate(id).orElseThrow(()->new NotFoundException("Không tìm thấy dự án!"));
+        entityManager.refresh(project);
+        if(!projectSecurity.hasPermission(id,PermissionName.DELETE_PROJECT))
             throw new AccessDeniedException("Bạn không có quyền xóa project");
 
-        Project project = projectRepository.findById(id).orElseThrow(()->new NotFoundException("Không tìm thấy dự án!"));
+        // Chỉ dọn membership của lead khi đó là thành viên duy nhất. FK giữ dữ liệu công việc, lỗi rollback cả membership.
+        var assigned=members.findByProject_ProjectId(id);
+        if(assigned.stream().anyMatch(m->project.getLead()==null||m.getUser().getUserId()!=project.getLead().getUserId()))
+            throw new ConflictException("Cần gỡ các thành viên khác trước khi xóa dự án");
+        members.deleteAll(assigned);members.flush();
         projectRepository.delete(project);
         // Đẩy DELETE xuống DB trong cùng transaction để FK từ chối trước khi ghi audit/báo thành công.
         projectRepository.flush();

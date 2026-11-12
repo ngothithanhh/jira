@@ -7,6 +7,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.List;
 
 public interface UserRoleAssignmentRepository extends JpaRepository<UserRoleAssignment, UserRoleAssignmentId> {
+    @org.springframework.data.jpa.repository.Query("select a.role.roleId, count(a) from UserRoleAssignment a group by a.role.roleId")
+    List<Object[]> countByRole();
     /** Đọc role toàn cục theo nhóm user trong trang; projection không tải user/hash hoặc gây N truy vấn lazy. */
     @org.springframework.data.jpa.repository.Query("select a.user.userId, a.role.roleId, a.role.roleName from UserRoleAssignment a where a.user.userId in :ids order by a.user.userId, a.role.roleId")
     List<Object[]> adminRolesForUsers(@org.springframework.data.repository.query.Param("ids") java.util.Collection<Integer> ids);

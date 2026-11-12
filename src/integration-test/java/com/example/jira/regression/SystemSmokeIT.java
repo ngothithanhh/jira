@@ -114,6 +114,53 @@ class SystemSmokeIT {
         assertThat(call("GET","/api/projects/"+projectId+"/reports/velocity",newToken,null,200).get(0).path("completedPoints").asInt()).isEqualTo(5);
     }
 
+
+    /** HTTP thật chứng minh user không global role tự tạo project và chỉ quản lý project mình sở hữu. */
+    @Test void ordinaryUserOwnsProjectAndAdminRoleCrudIsScoped() throws Exception {
+        String password="p1-regression-password";
+        for(String name:List.of("p1-owner","p1-other"))
+            call("POST","/api/auth/register",null,Map.of("email",name+"@test.invalid","userName",name,"fullName",name,"password",password),200);
+        String owner=login("p1-owner@test.invalid",password),other=login("p1-other@test.invalid",password);
+        int ownerId=users.findByEmail("p1-owner@test.invalid").orElseThrow().getUserId();
+        int otherId=users.findByEmail("p1-other@test.invalid").orElseThrow().getUserId();
+        var context=call("GET","/api/account/context",owner,null,200);
+        assertThat(context.path("systemAdmin").asBoolean()).isFalse();assertThat(context.path("globalPermissions").toString()).contains("CREATE_PROJECT").doesNotContain("DELETE_PROJECT");
+        var created=call("POST","/api/projects/create",owner,Map.of("projectName","Owner project","projectKey","P1OWN"),200);int id=created.path("projectId").asInt();
+        assertThat(created.path("memberCount").asInt()).isEqualTo(1);
+        int pm=roles.findByRoleName("PROJECT_MANAGER").orElseThrow().getRoleId(),dev=roles.findByRoleName("DEVELOPER").orElseThrow().getRoleId();
+        var member=call("GET","/api/projects/"+id+"/members",owner,null,200).get(0);
+        assertThat(member.path("userId").asInt()).isEqualTo(ownerId);
+        assertThat(call("GET","/api/account/context?projectId="+id,owner,null,200).path("projectPermissions").toString()).contains("DELETE_PROJECT");
+        // Assignment global legacy không tạo quyền xem/sửa/xóa project không có membership.
+        var legacy=new UserRoleAssignment();var developer=roles.findByRoleName("DEVELOPER").orElseThrow();
+        legacy.setId(new UserRoleAssignmentId(otherId,developer.getRoleId()));legacy.setUser(users.findById(otherId).orElseThrow());legacy.setRole(developer);assignments.saveAndFlush(legacy);
+        call("GET","/api/projects/"+id,other,null,403);
+        call("PATCH","/api/projects/"+id,other,Map.of("projectName","Stolen"),403);
+        call("DELETE","/api/projects/"+id,other,null,403);
+        call("POST","/api/projects/"+id+"/members",owner,Map.of("userId",otherId,"roleId",dev),200);
+        call("GET","/api/projects/"+id,other,null,200);
+        call("DELETE","/api/projects/"+id,owner,null,409);
+        call("DELETE","/api/projects/"+id+"/members/"+otherId,owner,null,200);
+        call("DELETE","/api/projects/"+id,owner,null,200);
+        call("GET","/api/projects/"+id,owner,null,404);
+        call("GET","/api/admin/roles",owner,null,403);
+        // Admin cấu hình role dự án nhưng không được gán role đó toàn cục qua API cũ.
+        var admin=Fixtures.user(0);admin.setEmail("p1-admin@test.invalid");admin.setPasswordHash(encoder.encode(password));admin=users.saveAndFlush(admin);
+        var assignment=new UserRoleAssignment();var sys=roles.findByRoleName("SYSTEM_ADMIN").orElseThrow();
+        assignment.setId(new UserRoleAssignmentId(admin.getUserId(),sys.getRoleId()));assignment.setUser(admin);assignment.setRole(sys);assignments.saveAndFlush(assignment);
+        String token=login(admin.getEmail(),password);
+        call("PUT","/api/admin/users/"+otherId+"/roles/"+pm,token,null,400);
+        int roleId=call("POST","/api/user-role",token,Map.of("roleName"," p1_reviewer "),201).path("role").asInt();
+        call("POST","/api/user-role",token,Map.of("roleName","P1_REVIEWER"),409);
+        call("PUT","/api/user-role/"+pm,token,Map.of("roleName","RENAME"),409);
+        call("DELETE","/api/user-role/"+dev,token,null,409);
+        call("PUT","/api/user-role/"+roleId,token,Map.of("roleName","P1_REVIEWER_NEW"),200);
+        assertThat(call("GET","/api/admin/roles",token,null,200).toString()).contains("P1_REVIEWER_NEW","projectAssignmentCount");
+        call("DELETE","/api/user-role/"+roleId,token,null,204);
+        call("DELETE","/api/user-role/"+roleId,token,null,404);
+        call("POST","/api/user-role",other,Map.of("roleName","NO_ADMIN"),403);
+    }
+
     /** Swagger phải sinh contract khi có advice/record DTO mới, không chỉ nạp được trang UI. */
     @Test void generatedOpenApiContainsNewRoutesAndBearerScheme() throws Exception {
         JsonNode spec=call("GET","/v3/api-docs",null,null,200);

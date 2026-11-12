@@ -29,12 +29,14 @@ class ConfigurationRegressionTest {
         @Mock UserRoleRepository roles;
         @Mock UserRoleAssignmentRepository assignments;
         @Mock ProjectMemberRepository members;
+        @Mock AdminRoleLock adminLock; @Mock RolePermissionRepository grants; @Mock com.example.jira.service.AuditLogService audit;
         @InjectMocks UserRoleServiceImpl service;
+        @BeforeEach void roleDefaults(){lenient().when(adminLock.target(7)).thenReturn(Fixtures.role(7,"REVIEWER"));}
         // Vai trò khóa quản trị không được tạo bản sao/đổi tên/xóa qua API cấu hình chung.
         @Test void systemAdminRoleIsReserved() {
             var request=new UserRoleRequest(); request.setRoleName("system_admin");
             assertThatThrownBy(() -> service.createRole(request)).isInstanceOf(com.example.jira.exception.ConflictException.class);
-            when(roles.findByRoleId(7)).thenReturn(Optional.of(Fixtures.role(7,"SYSTEM_ADMIN")));
+            when(adminLock.target(7)).thenReturn(Fixtures.role(7,"SYSTEM_ADMIN"));
             request.setRoleName("RENAMED");
             assertThatThrownBy(() -> service.updateRole(7,request)).isInstanceOf(com.example.jira.exception.ConflictException.class);
             assertThatThrownBy(() -> service.deleteRole(7)).isInstanceOf(com.example.jira.exception.ConflictException.class);
@@ -42,13 +44,13 @@ class ConfigurationRegressionTest {
         }
         // Tên role trùng không được tạo bản ghi mới.
         @Test void duplicateRoleIsRejected() {
-            when(roles.existsByRoleName("DEVELOPER")).thenReturn(true);
-            var r = new UserRoleRequest(); r.setRoleName("DEVELOPER");
+            when(roles.canonicalExists("REVIEWER",0)).thenReturn(true);
+            var r = new UserRoleRequest(); r.setRoleName("REVIEWER");
             assertThatThrownBy(() -> service.createRole(r)).hasMessageContaining("tồn tại"); verify(roles, never()).save(any());
         }
         // Tạo role hợp lệ giữ đúng tên trong response.
         @Test void createRoleReturnsSavedName() {
-            when(roles.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(roles.saveAndFlush(any())).thenAnswer(i -> i.getArgument(0));
             var r = new UserRoleRequest(); r.setRoleName("REVIEWER");
             assertThat(service.createRole(r).getRoleName()).isEqualTo("REVIEWER");
         }
@@ -63,9 +65,10 @@ class ConfigurationRegressionTest {
             assertThatThrownBy(() -> service.deleteRole(7)).hasMessageContaining("đang được gán"); verify(roles, never()).deleteById(anyInt());
         }
         // Role rỗng không còn người dùng được xóa đúng ID.
-        @Test void unusedRoleCanBeDeleted() { service.deleteRole(7); verify(roles).deleteById(7); }
+        @Test void unusedRoleCanBeDeleted() { service.deleteRole(7); verify(roles).delete(argThat(r->r.getRoleId()==7)); }
         // Cập nhật role không tồn tại không được ghi mới.
         @Test void missingRoleUpdateIsRejected() {
+            when(adminLock.target(7)).thenThrow(new com.example.jira.exception.NotFoundException("Không tìm thấy vai trò"));
             assertThatThrownBy(() -> service.updateRole(7, new UserRoleRequest())).hasMessageContaining("vai trò"); verify(roles, never()).save(any());
         }
     }
@@ -78,22 +81,23 @@ class ConfigurationRegressionTest {
         @Mock UserRoleAssignmentRepository assignments;
         @Mock RolePermissionRepository grants;
         @Mock PermissionRepository permissions;
+        @Mock AdminRoleLock adminLock;
         @InjectMocks PermissionServiceImpl service;
         // Permission trùng không được tạo lại.
         @Test void duplicatePermissionIsRejected() {
-            when(permissions.existsByPermissionName("EDIT_ISSUE")).thenReturn(true);
+            var existing=new Permission();existing.setPermissionId(1);existing.setPermissionName("EDIT_ISSUE");when(permissions.findAll()).thenReturn(List.of(existing));
             var r = new PermissionRequest(); r.setPermissionName("EDIT_ISSUE");
             assertThatThrownBy(() -> service.createPermission(r)).hasMessageContaining("tồn tại"); verify(permissions, never()).save(any());
         }
         // Permission mới giữ đúng mã dùng để kiểm quyền.
         @Test void createPermissionPreservesCode() {
-            when(permissions.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(permissions.saveAndFlush(any())).thenAnswer(i -> i.getArgument(0));
             var r = new PermissionRequest(); r.setPermissionName("EDIT_ISSUE");
             assertThat(service.createPermission(r).getPermissionName()).isEqualTo("EDIT_ISSUE");
         }
         // Permission đã được role sử dụng phải giữ lại.
         @Test void usedPermissionCannotBeDeleted() {
-            var p = new Permission(); p.setPermissionId(8); when(permissions.findById(8)).thenReturn(Optional.of(p));
+            var p = new Permission(); p.setPermissionId(8);p.setPermissionName("LEGACY"); when(permissions.findById(8)).thenReturn(Optional.of(p));
             when(grants.existsByPermission_PermissionId(8)).thenReturn(true);
             assertThatThrownBy(() -> service.deletePermission(8)).hasMessageContaining("đang được sử dụng"); verify(permissions, never()).delete(any());
         }
@@ -116,9 +120,11 @@ class ConfigurationRegressionTest {
         @Mock UserRoleRepository roles;
         @Mock PermissionRepository permissions;
         @Mock RolePermissionRepository grants;
+        @Mock AdminRoleLock adminLock; @Mock com.example.jira.service.AuditLogService audit;
         @InjectMocks RolePermissionServiceImpl service;
         // Không có role thì không tạo liên kết permission.
         @Test void missingRoleStopsGrant() {
+            when(adminLock.target(7)).thenThrow(new com.example.jira.exception.NotFoundException("Không tìm thấy vai trò"));
             assertThatThrownBy(() -> service.addPermissionToRole(7, 8)).hasMessageContaining("vai trò"); verifyNoInteractions(grants);
         }
         // Liên kết đã có phải báo trùng, không ghi lại.
@@ -128,20 +134,22 @@ class ConfigurationRegressionTest {
         }
         // Gỡ permission chỉ xóa liên kết role/permission, không xóa hai bảng gốc.
         @Test void revokeDeletesOnlyGrant() {
+            when(adminLock.target(7)).thenReturn(Fixtures.role(7,"REVIEWER"));
             var rp = new RolePermission(); when(grants.findByRole_RoleIdAndPermission_PermissionId(7, 8)).thenReturn(Optional.of(rp));
             service.removePermissionToRole(7, 8); verify(grants).delete(rp); verifyNoInteractions(roles, permissions);
         }
         // BUG-009: user thường không được sửa quyền của một vai trò toàn hệ thống.
         @Test void ordinaryUserCannotGrantPermissions() {
-            doThrow(new org.springframework.security.access.AccessDeniedException("Forbidden")).when(globalSecurity).assertSystemAdmin();
+            doThrow(new org.springframework.security.access.AccessDeniedException("Forbidden")).when(adminLock).begin();
             assertThatThrownBy(() -> service.addPermissionToRole(7, 8)).isInstanceOf(RuntimeException.class);
-            verify(globalSecurity).assertSystemAdmin();
+            verify(adminLock).begin();
             verify(grants, never()).save(any());
         }
         private void setupGrant() {
-            when(roles.findByRoleId(7)).thenReturn(Optional.of(Fixtures.role(7, "DEVELOPER")));
+            when(adminLock.target(7)).thenReturn(Fixtures.role(7, "DEVELOPER"));
             var p = new Permission(); p.setPermissionId(8); p.setPermissionName("MANAGE_SPRINT");
             when(permissions.findById(8)).thenReturn(Optional.of(p));
+            when(permissions.findAll()).thenReturn(List.of(p));
         }
     }
     @Nested @ExtendWith(MockitoExtension.class)

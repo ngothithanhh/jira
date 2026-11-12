@@ -90,12 +90,13 @@ class PostgresRegressionIT {
             SprintMetricsService.class, ScrumReportService.class, AccountManagementService.class,
             ProjectMemberServiceImpl.class, UserRoleServiceImpl.class, com.example.jira.security.GlobalSecurity.class,
             com.example.jira.security.CustomUserDetailsService.class, IssueCommentServiceImpl.class,
-            NotificationInboxService.class, AdminQueryService.class, DatabaseSeeder.class, IssueAttachmentServiceImpl.class,ProjectIssueTypeServiceImpl.class,WorkflowRuleServiceImpl.class,IssueStatusServiceImpl.class,IssueTypeServiceImpl.class,AdminUserQueryService.class})
+            NotificationInboxService.class, AdminQueryService.class, DatabaseSeeder.class, IssueAttachmentServiceImpl.class,ProjectIssueTypeServiceImpl.class,WorkflowRuleServiceImpl.class,IssueStatusServiceImpl.class,IssueTypeServiceImpl.class,AdminUserQueryService.class,com.example.jira.security.AdminRoleLock.class,AdminRoleQueryService.class,PermissionServiceImpl.class,RolePermissionServiceImpl.class,ProjectServiceImpl.class,ProjectStatsRepository.class})
     static class Config {
         // Cleanup container chạy khi context đóng; local cluster do script dừng sau khi Maven kết thúc.
         @Bean org.springframework.beans.factory.DisposableBean postgresCleanup() {
             return () -> { if (containerStarted) { POSTGRES.stop(); containerStarted = false; } };
         }
+        @Bean com.example.jira.mapper.ProjectMapper projectMapper(){return new com.example.jira.mapper.ProjectMapper();}
         @Bean PasswordEncoder passwordEncoder() { return new BCryptPasswordEncoder(4); }
         // Authentication thật trong integration account để kiểm mật khẩu/disabled qua DaoAuthenticationProvider.
         @Bean AuthenticationManager authenticationManager(com.example.jira.security.CustomUserDetailsService details,PasswordEncoder encoder) {
@@ -811,7 +812,7 @@ class PostgresRegressionIT {
         if(!operation.equals("add")) {
             var member=new ProjectMember();member.setId(new ProjectMemberId(projectId,targetId));member.setProject(project);member.setUser(target);member.setRole(newRole);members.saveAndFlush(member);
         }
-        var realSecurity=new ProjectSecurity(members,permissionLinks,projects,new com.example.jira.security.GlobalSecurity(roleAssignments,permissionLinks));
+        var realSecurity=new ProjectSecurity(members,permissionLinks,projects,new com.example.jira.security.GlobalSecurity(roleAssignments));
         Object serviceTarget=AopTestUtils.getUltimateTargetObject(memberService);
         ReflectionTestUtils.setField(serviceTarget,"projectSecurity",realSecurity);
         try {
@@ -1119,6 +1120,116 @@ class PostgresRegressionIT {
         var c = new BoardColumn(); c.setBoard(b); c.setColumnName(name); c.setPosition(position); return columns.saveAndFlush(c);
     }
     // Mỗi lời gọi tạo transaction độc lập, không dùng transaction tự rollback của DataJpaTest.
+
+
+    /** Role đang dùng ở project hoặc global legacy bị409, không tự gỡ assignment để xóa role. */
+    @Test void assignedRoleCannotBeDeletedAndRoleNameKeepsMembership(){
+        makeAdmin(caller);var r=roleRows.saveAndFlush(Fixtures.role(0,"CUSTOM"));
+        var member=new ProjectMember();member.setId(new ProjectMemberId(project.getProjectId(),caller.getUserId()));member.setProject(project);member.setUser(caller);member.setRole(r);members.saveAndFlush(member);
+        var request=new com.example.jira.dto.user_role.UserRoleRequest();request.setRoleName("CUSTOM_NEW");roleService.updateRole(r.getRoleId(),request);
+        assertThatThrownBy(()->roleService.deleteRole(r.getRoleId())).isInstanceOf(com.example.jira.exception.ConflictException.class);
+        assertThat(members.count()).isEqualTo(1);
+        members.deleteAll();members.flush();
+        var a=new UserRoleAssignment();a.setId(new UserRoleAssignmentId(caller.getUserId(),r.getRoleId()));a.setRole(r);a.setUser(caller);roleAssignments.saveAndFlush(a);
+        assertThatThrownBy(()->roleService.deleteRole(r.getRoleId())).isInstanceOf(com.example.jira.exception.ConflictException.class);
+        accounts.revokeRole(caller.getUserId(),r.getRoleId());roleService.deleteRole(r.getRoleId());
+        assertThat(roleRows.existsById(r.getRoleId())).isFalse();
+    }
+    /** Hai admin cùng tạo tên canonical chung chỉ một người lưu; log cũng chỉ có một CREATE_ROLE. */
+    @Test void concurrentRoleCreateSerializesAndAuditsOnce() throws Exception {
+        makeAdmin(caller);var second=Fixtures.user(0);second.setEmail("role-race-admin@test.invalid");second=users.saveAndFlush(second);makeAdmin(second);
+        var ids=List.of(caller.getUserId(),second.getUserId());var index=new java.util.concurrent.atomic.AtomicInteger();
+        var request=new com.example.jira.dto.user_role.UserRoleRequest();request.setRoleName("race_role");
+        var results=race(()->{Fixtures.login(ids.get(index.getAndIncrement()));try{return outcome(()->roleService.createRole(request));}finally{org.springframework.security.core.context.SecurityContextHolder.clearContext();}});
+        assertThat(results.stream().filter(r->r.failure()==null).count()).isEqualTo(1);
+        assertThat(results.stream().filter(r->r.failure() instanceof com.example.jira.exception.ConflictException).count()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from audit_logs where action='CREATE_ROLE'",Integer.class)).isEqualTo(1);
+    }
+    /** Alias permission canonical trùng dừng danh mục, không trả tập quyền có hai ID cho cùng mã. */
+    @Test void duplicateCanonicalPermissionCatalogFailsWithoutDeletingRows(){
+        makeAdmin(caller);var a=new Permission();a.setPermissionName("EDIT_ISSUE");emPermission(a);
+        var b=new Permission();b.setPermissionName(" edit_issue ");emPermission(b);
+        assertThatThrownBy(permissionCatalog::getAllPermissions).isInstanceOf(com.example.jira.exception.ConflictException.class);
+        assertThat(jdbc.queryForObject("select count(*) from permissions",Integer.class)).isEqualTo(2);
+    }
+
+    @Autowired ProjectServiceImpl projectService;
+    @Autowired AdminRoleQueryService roleCatalog;
+    @Autowired PermissionServiceImpl permissionCatalog;
+    @Autowired RolePermissionServiceImpl roleGrants;
+
+    /** Tạo project thường ghi lead/membership cùng transaction; trùng key không tạo thêm dự án hoặc membership. */
+    @Test void ordinaryCreatorGetsOwnManagerMembershipAndCanDeleteEmptyProject(){
+        var pm=roleRows.saveAndFlush(Fixtures.role(0,"PROJECT_MANAGER"));
+        var request=new com.example.jira.dto.project.CreateProjectRequest();request.setProjectName("Owned");request.setProjectKey("OWNED");
+        var result=projectService.createProject(request);int id=result.getProjectId();
+        assertThat(result.getMemberCount()).isEqualTo(1);
+        assertThat(projects.findById(id).orElseThrow().getLead().getUserId()).isEqualTo(caller.getUserId());
+        tx(()->{assertThat(members.findByProject_ProjectIdAndUser_UserId(id,caller.getUserId()).orElseThrow().getRole().getRoleId()).isEqualTo(pm.getRoleId());return null;});
+        assertThat(roleAssignments.count()).isZero();
+        assertThatThrownBy(()->projectService.createProject(request)).isInstanceOf(com.example.jira.exception.ConflictException.class);
+        when(security.hasPermission(id,PermissionName.DELETE_PROJECT)).thenReturn(true);
+        projectService.deleteProject(id);
+        assertThat(projects.existsById(id)).isFalse();assertThat(members.findByProject_ProjectId(id)).isEmpty();
+    }
+    /** FK từ issue chặn xóa sau dọn sole lead membership; rollback khôi phục đúng membership và project. */
+    @Test void ownerMembershipRemovalRollsBackWhenProjectHasIssue(){
+        roleRows.saveAndFlush(Fixtures.role(0,"PROJECT_MANAGER"));
+        var request=new com.example.jira.dto.project.CreateProjectRequest();request.setProjectName("Blocked");request.setProjectKey("BLOCKED");
+        int id=projectService.createProject(request).getProjectId();
+        var issue=new Issue();issue.setProject(projects.findById(id).orElseThrow());issue.setSummary("Keep");issue.setIssueKey("BLOCKED-1");issue.setIssueNumber(1);issues.saveAndFlush(issue);
+        when(security.hasPermission(id,PermissionName.DELETE_PROJECT)).thenReturn(true);
+        assertThatThrownBy(()->projectService.deleteProject(id)).isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        assertThat(projects.existsById(id)).isTrue();assertThat(members.findByProject_ProjectId(id)).hasSize(1);assertThat(issues.count()).isEqualTo(1);
+    }
+    /** Role default thiếu thì không lưu project mồ côi; audit lỗi bên ngoài transaction cũng rollback cả membership. */
+    @Test void projectCreateRollbackAndMissingDefaultAreAtomic(){
+        var request=new com.example.jira.dto.project.CreateProjectRequest();request.setProjectName("Atomic");request.setProjectKey("ATOMIC");
+        assertThatThrownBy(()->projectService.createProject(request)).isInstanceOf(com.example.jira.exception.ConflictException.class);
+        assertThat(projects.count()).isEqualTo(1);assertThat(members.count()).isZero();
+        roleRows.saveAndFlush(Fixtures.role(0,"PROJECT_MANAGER"));
+        assertThatThrownBy(()->tx(()->{projectService.createProject(request);throw new IllegalStateException("rollback audit");})).hasMessageContaining("rollback audit");
+        assertThat(projects.count()).isEqualTo(1);assertThat(members.count()).isZero();
+    }
+    /** Hai lượt cùng key trên hai transaction chỉ tạo đúng một project và một membership. */
+    @Test void concurrentProjectCreationCannotDuplicateMembership() throws Exception {
+        roleRows.saveAndFlush(Fixtures.role(0,"PROJECT_MANAGER"));
+        var request=new com.example.jira.dto.project.CreateProjectRequest();request.setProjectName("Race");request.setProjectKey("RACE");
+        var results=race(()->{Fixtures.login(caller.getUserId());return outcome(()->projectService.createProject(request));});
+        assertThat(results.stream().filter(r->r.failure()==null).count()).isEqualTo(1);
+        assertThat(results.stream().filter(r->r.failure() instanceof com.example.jira.exception.ConflictException).count()).isEqualTo(1);
+        assertThat(projects.count()).isEqualTo(2);assertThat(members.count()).isEqualTo(1);
+    }
+    /** CRUD custom giữ ID/grants khi đổi tên; xóa role rỗng dọn riêng grants và lưu audit ROLE. */
+    @Test void roleCrudNormalizesPreservesLinksAndCleansOnlyOwnGrants() throws Exception {
+        makeAdmin(caller);
+        String sql=java.nio.file.Files.readString(java.nio.file.Path.of("scripts/migrations/010_role_permission_audit.sql"));jdbc.execute(sql);jdbc.execute(sql);
+        var request=new com.example.jira.dto.user_role.UserRoleRequest();request.setRoleName(" reviewer ");
+        int id=roleService.createRole(request).getRole();
+        assertThat(roleRows.findById(id).orElseThrow().getRoleName()).isEqualTo("REVIEWER");
+        assertThatThrownBy(()->roleService.createRole(request)).isInstanceOf(com.example.jira.exception.ConflictException.class);
+        var permission=new Permission();permission.setPermissionName("EDIT_ISSUE");permission=emPermission(permission);
+        roleGrants.addPermissionToRole(id,permission.getPermissionId());
+        request.setRoleName("REVIEWER_TWO");roleService.updateRole(id,request);
+        assertThat(permissionLinks.existsByRole_RoleIdAndPermission_PermissionId(id,permission.getPermissionId())).isTrue();
+        var count=roleCatalog.list().stream().filter(r->r.role()==id).findFirst().orElseThrow();assertThat(count.scope()).isEqualTo("PROJECT");assertThat(count.globalAssignmentCount()).isZero();
+        roleService.deleteRole(id);
+        assertThat(roleRows.existsById(id)).isFalse();assertThat(permissionLinks.count()).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from audit_logs where entity_type='ROLE' and entity_id=?",Integer.class,id)).isEqualTo(4);
+    }
+    /** Role project không được gán global; catalog cố định không được phá qua API legacy, grant global-only bị chặn. */
+    @Test void scopeAndFixedPermissionGuardsProtectLegacyApis(){
+        makeAdmin(caller);var developer=roleRows.saveAndFlush(Fixtures.role(0,"DEVELOPER"));
+        assertThatThrownBy(()->accounts.grantRole(caller.getUserId(),developer.getRoleId())).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        var req=new com.example.jira.dto.permission.PermissionRequest();req.setPermissionName("DELETE_PROJECT");var saved=permissionCatalog.createPermission(req);
+        assertThatThrownBy(()->permissionCatalog.deletePermission(saved.getPermissionId())).isInstanceOf(com.example.jira.exception.ConflictException.class);
+        assertThatThrownBy(()->roleGrants.addPermissionToRole(developer.getRoleId(),saved.getPermissionId())).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        req.setPermissionName("MADE_UP");assertThatThrownBy(()->permissionCatalog.createPermission(req)).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        assertThat(roleAssignments.count()).isEqualTo(1);
+    }
+    /** Giúp tạo permission thật trên DB test trong transaction, không gọi API catalog đã được test ở case riêng. */
+    private Permission emPermission(Permission p){return tx(()->{em.persist(p);em.flush();return p;});}
+
     private <T> T tx(Supplier<T> action) { return new TransactionTemplate(manager).execute(status -> action.get()); }
     // Giới hạn thời gian để deadlock/barrier hỏng làm test thất bại thay vì treo vô hạn.
     private static void await(CyclicBarrier barrier) {

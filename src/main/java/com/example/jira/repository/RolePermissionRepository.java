@@ -8,6 +8,9 @@ import java.util.List;
 import java.util.Optional;
 
 public interface RolePermissionRepository extends JpaRepository<RolePermission, RolePermissionId> {
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.data.jpa.repository.Query("delete from RolePermission rp where rp.role.roleId=:id")
+    int deleteForRole(@org.springframework.data.repository.query.Param("id") int id);
     boolean existsByRole_RoleIdAndPermission_PermissionName(int roleId, String permissionName);
     boolean existsByRole_RoleIdAndPermission_PermissionId(int roleId, int permissionId);
     Optional<RolePermission> findByRole_RoleIdAndPermission_PermissionId(int roleId, int permissionId);

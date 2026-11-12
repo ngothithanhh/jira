@@ -1,7 +1,5 @@
 package com.example.jira.security;
 
-import com.example.jira.entity.UserRoleAssignment;
-import com.example.jira.repository.RolePermissionRepository;
 import com.example.jira.repository.UserRoleAssignmentRepository;
 import com.example.jira.enums.PermissionName;
 import com.example.jira.ultils.SecurityUtils;
@@ -11,7 +9,6 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.security.core.context.SecurityContextHolder;
 
-import java.util.List;
 
 @Component("globalSecurity")
 @RequiredArgsConstructor
@@ -20,7 +17,6 @@ import java.util.List;
 public class GlobalSecurity {
 
     private final UserRoleAssignmentRepository userRoleAssignmentRepository;
-    private final RolePermissionRepository rolePermissionRepository;
 
 
     /**
@@ -56,28 +52,13 @@ public class GlobalSecurity {
 
     /**
      * Kiểm quyền toàn cục của người gọi cho các luồng cũ như tạo/xóa project.
-     * Admin có quyền; các role khác chỉ có permission cụ thể trong role_permissions, không trở thành admin.
+     * CREATE_PROJECT cho mọi tài khoản đã xác thực; các quyền toàn hệ thống khác chỉ dành SYSTEM_ADMIN.
+     * Assignment legacy của role dự án không cấp quyền toàn cục.
+     * Quyền của các role đó được ProjectSecurity xét theo đúng project_members, không đọc tại đây.
      */
     public boolean hasPermission(PermissionName permission) {
-        int userId = currentUserId();
-
-        List<UserRoleAssignment> assignments = userRoleAssignmentRepository.findByUser_UserId(userId);
-
-        if (assignments.isEmpty()) {
-            return false;
-        }
-
-        for (UserRoleAssignment assignment : assignments) {
-            // Role quản trị được gán toàn cục có quyền kể cả khi chưa seed đủ role_permissions.
-            if ("SYSTEM_ADMIN".equalsIgnoreCase(assignment.getRole().getRoleName())) {
-                return true;
-            }
-            int roleId = assignment.getRole().getRoleId();
-            if (rolePermissionRepository.existsByRole_RoleIdAndPermission_PermissionName(roleId, permission.name())) {
-                return true;
-            }
-        }
-
-        return false;
+        // Tạo project là khả năng chung của tài khoản đã xác thực; JWT filter/context kiểm tài khoản còn hoạt động.
+        currentUserId();
+        return permission == PermissionName.CREATE_PROJECT || isSystemAdmin();
     }
 }
