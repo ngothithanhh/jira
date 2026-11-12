@@ -5,7 +5,7 @@ import java.util.function.BooleanSupplier;
 
 interface MailSender {
     enum Outcome { ACCEPTED, RETRYABLE, UNKNOWN, FAILED }
-    enum Code { RATE_LIMIT, TOKEN_UNAVAILABLE, MAIL_REAUTH, REJECTED, DELIVERY_UNKNOWN, INVALID_PAYLOAD, INELIGIBLE }
+    enum Code { RATE_LIMIT, TOKEN_UNAVAILABLE, MAIL_REAUTH, BREVO_AUTH, REJECTED, DELIVERY_UNKNOWN, INVALID_PAYLOAD, INELIGIBLE }
 
     record Result(Outcome outcome, Code code, Duration retryAfter, String providerMessageId) {
         static Result accepted(String id) { return new Result(Outcome.ACCEPTED, null, null, id); }

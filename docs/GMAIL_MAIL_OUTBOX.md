@@ -2,6 +2,8 @@
 
 E0 cung cấp transport và hàng đợi nội bộ cho OTP đăng ký, xác minh email tài khoản và lời mời project. Môi trường mặc định tắt worker qua `MAIL_ENABLED=false`. Các đợt nghiệp vụ sẽ enqueue bằng `MailOutbox` trong transaction của chúng.
 
+Xem [hướng dẫn Brevo](BREVO_MAIL_OUTBOX.md) để cấu hình và kiểm provider E0 đã chọn cho gửi live.
+
 ## Kiểm local
 
 Từ root BE, chạy các lệnh sau với JDK đã cài. Script PostgreSQL tạo cluster riêng trên loopback, xác minh đích trước DDL và dừng đúng cluster khi xong.

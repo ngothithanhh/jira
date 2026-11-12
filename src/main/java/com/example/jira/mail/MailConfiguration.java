@@ -22,15 +22,25 @@ class MailConfiguration {
         return new MailOutbox(db, new MailPayloadCipher(key, version, json));
     }
 
-    /** Khi bật mail, yêu cầu cấu hình sender và file OAuth trước khi dựng worker. */
+    /** Chỉ dựng worker khi provider được chọn có cấu hình gửi hợp lệ. */
     @Bean
-    MailSender gmailSender(ObjectMapper json, @Value("${app.mail.provider:gmail-api}") String provider,
-                           @Value("${app.mail.sender-address:}") String sender,
-                           @Value("${app.mail.sender-name:Jira}") String name,
-                           @Value("${app.gmail.token-file:}") String tokenFile) {
-        if (!provider.equals("gmail-api") || tokenFile.isBlank()) throw new IllegalArgumentException("Thiếu cấu hình Gmail API");
-        MailMessage.requireAddress(sender);
-        return new GmailApiMailSender(GmailCredentials.read(Path.of(tokenFile), sender, json), sender, name, json, Clock.systemUTC());
+    MailSender mailSender(ObjectMapper json, @Value("${app.mail.provider:gmail-api}") String provider,
+                          @Value("${app.mail.sender-address:}") String sender,
+                          @Value("${app.mail.sender-name:Jira}") String name,
+                          @Value("${app.gmail.token-file:}") String tokenFile,
+                          @Value("${BREVO_API_KEY:}") String brevoKey,
+                          @Value("${BREVO_SENDER_EMAIL:}") String brevoSender,
+                          @Value("${BREVO_SENDER_NAME:Jira}") String brevoName) {
+        return switch (provider) {
+            case "brevo" -> new BrevoMailSender(brevoKey, brevoSender, brevoName, json);
+            case "gmail-api" -> {
+                if (tokenFile.isBlank()) throw new IllegalArgumentException("Thiếu cấu hình Gmail API");
+                MailMessage.requireAddress(sender);
+                yield new GmailApiMailSender(GmailCredentials.read(Path.of(tokenFile), sender, json),
+                        sender, name, json, Clock.systemUTC());
+            }
+            default -> throw new IllegalArgumentException("Provider gửi thư không được hỗ trợ");
+        };
     }
 
     @Bean

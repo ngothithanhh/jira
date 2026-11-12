@@ -130,6 +130,37 @@ class MailOutboxPostgresIT {
         assertThat(status(id)).isEqualTo("PROVIDER_ACCEPTED");
     }
 
+    @Test void brevoRateLimitSchedulesRetryThenPersistsAcceptance() throws Exception {
+        UUID id = enqueue(UUID.randomUUID(), 1);
+        var posts = new AtomicInteger();
+        try (var brevo = new BrevoMailSenderTest.BrevoStub(exchange -> {
+            if (posts.incrementAndGet() == 1) {
+                exchange.getResponseHeaders().set("x-sib-ratelimit-reset", "45");
+                BrevoMailSenderTest.respond(exchange, 429, "{}");
+            } else {
+                BrevoMailSenderTest.accepted(exchange);
+            }
+        })) {
+            var worker = worker(brevo.sender());
+            Instant beforeDispatch = Instant.now();
+            assertThat(worker.processOne()).isTrue();
+            assertThat(status(id)).isEqualTo("RETRY_WAIT");
+            assertThat(db.queryForObject("SELECT next_attempt_at >= ? FROM mail_outbox WHERE id=?", Boolean.class,
+                    java.sql.Timestamp.from(beforeDispatch.plusSeconds(45)), id)).isTrue();
+            assertThat(worker.processOne()).isFalse();
+            assertThat(posts).hasValue(1);
+
+            db.update("UPDATE mail_outbox SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE id=?", id);
+            assertThat(worker.processOne()).isTrue();
+            assertThat(worker.processOne()).isFalse();
+            assertThat(posts).hasValue(2);
+            assertThat(status(id)).isEqualTo("PROVIDER_ACCEPTED");
+            assertThat(db.queryForObject("SELECT provider_message_id FROM mail_outbox WHERE id=?", String.class, id))
+                    .isEqualTo(BrevoMailSenderTest.MESSAGE_ID);
+            assertErased(id);
+        }
+    }
+
     @Test void supersedeBlocksClaimedMailAndRetryOfMailAlreadyInFlight() {
         UUID aggregate = UUID.randomUUID();
         UUID first = enqueue(aggregate, 1);

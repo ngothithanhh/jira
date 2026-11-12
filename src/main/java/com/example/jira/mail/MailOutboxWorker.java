@@ -56,6 +56,7 @@ final class MailOutboxWorker {
         }
         MailSender.Result result = sender.send(message, () -> outbox.canDispatch(lease));
         if (result.code() == MailSender.Code.MAIL_REAUTH) LOG.warn("Gmail sender needs reauthorization.");
+        if (result.code() == MailSender.Code.BREVO_AUTH) LOG.warn("Brevo rejected API credentials. Check local configuration and restart the sender.");
         switch (result.outcome()) {
             case ACCEPTED -> outbox.finish(lease, MailOutbox.Status.PROVIDER_ACCEPTED, null, result.providerMessageId(), null);
             case UNKNOWN -> outbox.finish(lease, MailOutbox.Status.UNKNOWN, result.code(), null, null);
