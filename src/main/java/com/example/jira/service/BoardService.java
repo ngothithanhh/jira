@@ -13,6 +13,6 @@ public interface BoardService {
     List<BoardResponse> getBoardsByProject(int projectId);
     BoardResponse addColumn(CreateColumnRequest request);
     void mapStatusToColumn(int columnId, int statusId);
-    void updateColumnOrder(int boardId, List<UpdateColumnOrderRequest> requests);
+    void updateColumnOrder(int boardId, String expected, List<UpdateColumnOrderRequest> requests);
     void unmapStatusFromColumn(int columnId, int statusId);
 }

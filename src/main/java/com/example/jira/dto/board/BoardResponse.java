@@ -12,6 +12,7 @@ public class BoardResponse {
     private String boardName;
     private String boardType;
     private LocalDateTime createdAt;
+    private String columnOrderToken;
     private List<BoardColumnDto> columns;
 
     @Data

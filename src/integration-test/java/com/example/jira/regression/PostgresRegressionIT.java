@@ -198,14 +198,16 @@ class PostgresRegressionIT {
         assertThat(issues.findMaxIssueNumberByProjectId(project.getProjectId())).contains(7);
         assertThat(issues.findMaxIssueNumberByProjectId(999)).isEmpty();
     }
-    // Transaction thật phải rollback cột đầu khi cột sau thuộc board khác.
+    // Validation toàn tập phải giữ nguyên vị trí cột đầu khi phần tử cuối thuộc board khác.
     @Test void columnReorderingRollsBackWhenLaterColumnIsInvalid() {
         var b1 = persistedBoard("one"); var b2 = persistedBoard("two");
-        var c1 = persistedColumn(b1, "Todo", 1); var c2 = persistedColumn(b2, "Other", 2);
+        var c1 = persistedColumn(b1, "Todo", 1); var existing = persistedColumn(b1, "Done", 2);
+        var c2 = persistedColumn(b2, "Other", 2);
         when(security.hasPermission(project.getProjectId(), PermissionName.MANAGE_BOARD)).thenReturn(true);
-        var a = new com.example.jira.dto.board.UpdateColumnOrderRequest(); a.setColumnId(c1.getColumnId()); a.setPosition(9);
-        var b = new com.example.jira.dto.board.UpdateColumnOrderRequest(); b.setColumnId(c2.getColumnId()); b.setPosition(10);
-        assertThatThrownBy(() -> boardService.updateColumnOrder(b1.getBoardId(), List.of(a, b))).hasMessageContaining("không thuộc");
+        var a = new com.example.jira.dto.board.UpdateColumnOrderRequest(c1.getColumnId(), 0);
+        var b = new com.example.jira.dto.board.UpdateColumnOrderRequest(c2.getColumnId(), 1);
+        var token = com.example.jira.dto.board.ColumnOrderToken.of(b1.getBoardId(), List.of(c1, existing));
+        assertThatThrownBy(() -> boardService.updateColumnOrder(b1.getBoardId(), token, List.of(a, b))).hasMessageContaining("toàn bộ cột");
         assertThat(columns.findById(c1.getColumnId()).orElseThrow().getPosition()).isEqualTo(1);
     }
     // Đóng sprint với đích không tồn tại phải rollback trạng thái CLOSED đã gán trước đó.

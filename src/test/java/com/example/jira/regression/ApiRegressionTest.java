@@ -455,9 +455,14 @@ class ApiRegressionTest {
     }
     // Reorder giữ board ID và danh sách columnId/position từ body.
     @Test void reorderColumnRoutePreservesPositions() throws Exception {
+        String token = "a".repeat(64);
         mvc.perform(put("/api/boards/50/columns/order").header("Authorization", bearer()).contentType(MediaType.APPLICATION_JSON)
-                .content("[{\"columnId\":60,\"position\":3}]")) .andExpect(status().isOk());
-        verify(boards).updateColumnOrder(eq(50), argThat(r -> r.size() == 1 && r.get(0).getColumnId() == 60 && r.get(0).getPosition() == 3));
+                .header("X-Expected-Column-Order", token).content("[{\"columnId\":60,\"position\":0}]"))
+                .andExpect(status().isOk()).andExpect(content().string(""));
+        verify(boards).updateColumnOrder(eq(50), eq(token), argThat(r -> r.size() == 1 && r.get(0).getColumnId() == 60 && r.get(0).getPosition() == 0));
+        mvc.perform(put("/api/boards/50/columns/order").header("Authorization", bearer()).contentType(MediaType.APPLICATION_JSON)
+                .header("X-Expected-Column-Order", token).content("[{\"columnId\":60,\"position\":0.5}]"))
+                .andExpect(status().isBadRequest());
     }
     // Query unreadOnly phải chọn nhánh chưa đọc thay vì trả toàn bộ thông báo.
     @Test void unreadOnlyUsesUnreadService() throws Exception {

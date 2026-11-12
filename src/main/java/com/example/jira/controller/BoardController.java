@@ -1,16 +1,19 @@
 package com.example.jira.controller;
 
 import com.example.jira.dto.board.BoardResponse;
+import com.example.jira.dto.board.ColumnOrderToken;
 import com.example.jira.dto.board.CreateBoardRequest;
 import com.example.jira.dto.board.CreateColumnRequest;
 import com.example.jira.dto.board.MapColumnStatusRequest;
 import com.example.jira.dto.board.UpdateColumnOrderRequest;
 import com.example.jira.service.BoardService;
+import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
@@ -48,8 +51,17 @@ public class BoardController {
     }
 
     @PutMapping("/{boardId}/columns/order")
-    public ResponseEntity<Void> updateColumnOrder(@PathVariable int boardId, @Valid @RequestBody List<UpdateColumnOrderRequest> requests) {
-        boardService.updateColumnOrder(boardId, requests);
+    public ResponseEntity<Void> updateColumnOrder(@PathVariable String boardId,
+            @RequestHeader(value = ColumnOrderToken.HEADER, required = false) String expected,
+            @RequestBody JsonNode input) {
+        int id;
+        try {
+            if (!boardId.matches("[1-9][0-9]{0,9}")) throw new NumberFormatException();
+            id = Integer.parseInt(boardId);
+        } catch (NumberFormatException invalid) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "ID board không hợp lệ");
+        }
+        boardService.updateColumnOrder(id, expected, UpdateColumnOrderRequest.parse(input));
         return ResponseEntity.ok().build();
     }
 

@@ -10,6 +10,9 @@ Tất cả route dùng Bearer JWT. Các mutation lấy project từ sprint/board
 | DELETE `/api/boards/{id}` | Không có | MANAGE_BOARD; 204 |
 | PATCH `/api/boards/columns/{id}` | `{"columnName":"Doing","wipLimit":3}`; trường tùy chọn | MANAGE_BOARD; 204 |
 | DELETE `/api/boards/columns/{id}` | Không có | MANAGE_BOARD; 204; cột rỗng theo mapping |
+| PUT `/api/boards/{boardId}/columns/order` | Mảng đủ cột `[{"columnId":11,"position":0},…]` | MANAGE_BOARD; `X-Expected-Column-Order` bắt buộc; `200` rỗng |
+
+Lấy `columnOrderToken` từ `GET /api/boards/{boardId}` và gửi nguyên giá trị trong `X-Expected-Column-Order`. Gửi đủ các ID cột với vị trí duy nhất từ `0` đến `n-1`. Dữ liệu hoặc token sai định dạng trả `400`. Token cũ hoặc tập cột khác dữ liệu hiện tại trả `409` và cần đọc lại board. Reorder kiểm quyền và snapshot dưới cùng khóa project với thêm/xóa cột. Transaction chỉ ghi `board_columns.position`.
 
 Sprint FUTURE được sửa ngày; hai ngày sau khi ghép với dữ liệu cũ phải bắt đầu trước kết thúc. ACTIVE chỉ sửa tên/goal, đổi ngày trả 409. CLOSED không sửa/xóa. Null là giữ nguyên, goal rỗng xóa nội dung goal. Xóa FUTURE gỡ liên kết và reset rank product cho việc được trả lại, giữ issue và lịch sử sprint CLOSED khác.
 

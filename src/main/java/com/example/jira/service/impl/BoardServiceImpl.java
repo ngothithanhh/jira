@@ -1,6 +1,7 @@
 package com.example.jira.service.impl;
 
 import com.example.jira.dto.board.BoardResponse;
+import com.example.jira.dto.board.ColumnOrderToken;
 import com.example.jira.dto.board.CreateBoardRequest;
 import com.example.jira.dto.board.CreateColumnRequest;
 import com.example.jira.dto.board.UpdateColumnOrderRequest;
@@ -12,14 +13,19 @@ import com.example.jira.enums.PermissionName;
 import com.example.jira.service.BoardService;
 import com.example.jira.exception.NotFoundException;
 import com.example.jira.exception.ConflictException;
+import com.example.jira.ultils.SecurityUtils;
+import jakarta.persistence.EntityNotFoundException;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.http.HttpStatus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -107,11 +113,7 @@ public class BoardServiceImpl implements BoardService {
     @Override
     @Transactional
     public BoardResponse addColumn(CreateColumnRequest request) {
-        Board board = boardRepository.findById(request.getBoardId()).orElseThrow(() -> new NotFoundException("Không tìm thấy bảng"));
-        // Thiếu quyền trên bên sở hữu dữ liệu thì dừng bằng 403, không thực hiện các cập nhật bên dưới.
-        if (!projectSecurity.hasPermission(board.getProject().getProjectId(), PermissionName.MANAGE_BOARD)) {
-            throw new AccessDeniedException("Không có quyền thực hiện");
-        }
+        Board board = lockManagedBoard(request.getBoardId());
 
         BoardColumn column = new BoardColumn();
         column.setBoard(board);
@@ -151,27 +153,65 @@ public class BoardServiceImpl implements BoardService {
         boardColumnStatusRepository.save(bcs);
     }
 
-    /** boardId là ID boards; từng columnId phải thuộc board này. Kiểm MANAGE_BOARD của project sở hữu trước cập nhật position; thiếu quyền thì 403. */
+    /** So snapshot dưới khóa project rồi cập nhật vị trí của đúng tập cột trong một transaction. */
     @Override
     @Transactional
-    public void updateColumnOrder(int boardId, List<UpdateColumnOrderRequest> requests) {
-        Board board = boardRepository.findById(boardId).orElseThrow(() -> new NotFoundException("Không tìm thấy bảng"));
-        // Thiếu quyền trên bên sở hữu dữ liệu thì dừng bằng 403, không thực hiện các cập nhật bên dưới.
-        if (!projectSecurity.hasPermission(board.getProject().getProjectId(), PermissionName.MANAGE_BOARD)) {
-            throw new AccessDeniedException("Không có quyền thực hiện");
+    public void updateColumnOrder(int boardId, String expected, List<UpdateColumnOrderRequest> requests) {
+        if (boardId <= 0 || !ColumnOrderToken.valid(expected) || requests == null || requests.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Thiếu board, token hoặc danh sách thứ tự cột hợp lệ");
+        }
+        Map<Integer, Integer> positions = new HashMap<>();
+        boolean[] usedPositions = new boolean[requests.size()];
+        for (UpdateColumnOrderRequest request : requests) {
+            if (request == null || request.getColumnId() == null || request.getColumnId() <= 0
+                    || request.getPosition() == null || request.getPosition() < 0 || request.getPosition() >= requests.size()
+                    || usedPositions[request.getPosition()] || positions.putIfAbsent(request.getColumnId(), request.getPosition()) != null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "ID và vị trí cột phải duy nhất, vị trí liên tục từ 0");
+            }
+            usedPositions[request.getPosition()] = true;
         }
 
-        for (UpdateColumnOrderRequest request : requests) {
-            BoardColumn column = boardColumnRepository.findById(request.getColumnId())
-                    .orElseThrow(() -> new NotFoundException("Không tìm thấy cột với ID: " + request.getColumnId()));
-            
-            // Kiểm tra cột có thuộc bảng này không
-            if (column.getBoard().getBoardId() != boardId) {
-                throw new ConflictException("Cột không thuộc bảng này");
+        lockManagedBoard(boardId);
+        List<BoardColumn> columns = boardColumnRepository.findByBoard_BoardIdOrderByPositionAsc(boardId);
+        if (!ColumnOrderToken.of(boardId, columns).equals(expected)) {
+            throw new ConflictException("Thứ tự hoặc tập cột đã thay đổi. Hãy tải lại board");
+        }
+        if (columns.size() != positions.size() || columns.stream().anyMatch(column -> !positions.containsKey(column.getColumnId()))) {
+            throw new ConflictException("Danh sách phải chứa đúng toàn bộ cột của board");
+        }
+        for (BoardColumn column : columns) {
+            int position = positions.get(column.getColumnId());
+            if (position != column.getPosition() && boardColumnRepository.updatePosition(boardId, column.getColumnId(), position) != 1) {
+                throw new ConflictException("Cột không còn thuộc board");
             }
-            
-            column.setPosition(request.getPosition());
-            boardColumnRepository.save(column);
+        }
+        entityManager.flush();
+    }
+
+    /** Thêm cột và reorder dùng cùng khóa với xóa cột/board; kiểm lại membership sau khi chờ. */
+    private Board lockManagedBoard(int boardId) {
+        Board board = boardRepository.findById(boardId).orElseThrow(() -> new NotFoundException("Không tìm thấy bảng"));
+        int projectId = board.getProject().getProjectId();
+        requireManageBoard(projectId);
+        Project project = projectRepository.findByIdForUpdate(projectId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy dự án"));
+        entityManager.refresh(project);
+        ProjectMember member = entityManager.find(ProjectMember.class, new ProjectMemberId(projectId, SecurityUtils.getCurrentUserId()));
+        if (member != null) {
+            try {
+                entityManager.refresh(member);
+            } catch (EntityNotFoundException removed) {
+                throw new AccessDeniedException("Bạn không còn là thành viên dự án");
+            }
+        }
+        requireManageBoard(projectId);
+        entityManager.refresh(board);
+        return board;
+    }
+
+    private void requireManageBoard(int projectId) {
+        if (!projectSecurity.hasPermission(projectId, PermissionName.MANAGE_BOARD)) {
+            throw new AccessDeniedException("Không có quyền thực hiện");
         }
     }
 
