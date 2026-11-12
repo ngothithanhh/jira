@@ -42,6 +42,9 @@ class SystemSmokeIT {
     @LocalServerPort int port;
     @Autowired ObjectMapper json;
     @Autowired UserRepository users;
+    @Autowired ProjectRepository projects;
+    @Autowired ProjectMemberRepository members;
+    @Autowired com.example.jira.service.NotificationService notifications;
     @Autowired UserRoleRepository roles;
     @Autowired UserRoleAssignmentRepository assignments;
     @Autowired IssueTypeRepository types;
@@ -101,7 +104,8 @@ class SystemSmokeIT {
         call("GET","/api/admin/overview",regularToken,null,403); call("GET","/api/issues/"+issueId,regularToken,null,403);
         int regularId=users.findByEmail("smoke-user@test.invalid").orElseThrow().getUserId();
         int developerId=roles.findByRoleName("DEVELOPER").orElseThrow().getRoleId();
-        call("POST","/api/projects/"+projectId+"/members",token,Map.of("userId",regularId,"roleId",developerId),200);
+        seedMembership(projectId, regularId, developerId);
+        notifications.sendNotification(regularId, null, admin.getUserId(), com.example.jira.enums.NotificationType.PROJECT_INVITED, "Smoke notification");
         assertThat(call("GET","/api/notifications/unread-count",regularToken,null,200).path("count").asInt()).isEqualTo(1);
         assertThat(call("PUT","/api/notifications/read-all",regularToken,null,200).path("updated").asInt()).isEqualTo(1);
         call("GET","/api/issues/"+issueId,regularToken,null,200);
@@ -136,7 +140,7 @@ class SystemSmokeIT {
         call("GET","/api/projects/"+id,other,null,403);
         call("PATCH","/api/projects/"+id,other,Map.of("projectName","Stolen"),403);
         call("DELETE","/api/projects/"+id,other,null,403);
-        call("POST","/api/projects/"+id+"/members",owner,Map.of("userId",otherId,"roleId",dev),200);
+        seedMembership(id, otherId, dev);
         call("GET","/api/projects/"+id,other,null,200);
         call("DELETE","/api/projects/"+id,owner,null,409);
         call("DELETE","/api/projects/"+id+"/members/"+otherId,owner,null,200);
@@ -169,6 +173,17 @@ class SystemSmokeIT {
             assertThat(spec.path("paths").has(path)).as("OpenAPI path %s",path).isTrue();
         }
     }
+    // Fixture riêng cho luồng board/account. Luồng tạo membership qua accept được kiểm trong suite email.
+    private void seedMembership(int projectId, int userId, int roleId) {
+        var member = new ProjectMember();
+        member.setId(new ProjectMemberId(projectId, userId));
+        member.setProject(projects.findById(projectId).orElseThrow());
+        member.setUser(users.findById(userId).orElseThrow());
+        member.setRole(roles.findById(roleId).orElseThrow());
+        member.setAssignedAt(java.time.LocalDateTime.now());
+        members.saveAndFlush(member);
+    }
+
     private void seedVerifiedUser(String name, String password) {
         var user = Fixtures.user(0);
         user.setEmail(name + "@test.invalid");

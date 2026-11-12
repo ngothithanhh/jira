@@ -31,7 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.assertj.core.api.Assertions.*;
 
 /** Kiểm tra HTTP thật qua MVC và JWT filter; nghiệp vụ service được kiểm tra ở các lớp khác. */
-@WebMvcTest(controllers = {AuthController.class, VerificationController.class, UserController.class, ProjectController.class,
+@WebMvcTest(controllers = {com.example.jira.invitations.ProjectInvitationController.class, AuthController.class, VerificationController.class, UserController.class, ProjectController.class,
         ProjectMemberController.class, ProjectIssueTypeController.class, IssueController.class,
         IssueCommentController.class, IssueAttachmentController.class, IssueTypeController.class,
         IssueStatusController.class, UserRoleController.class, PermissionController.class,
@@ -44,6 +44,7 @@ class ApiRegressionTest {
     @Autowired JwtUtil jwt;
     @MockBean CustomUserDetailsService details;
     @MockBean AuthService auth;
+    @MockBean com.example.jira.invitations.ProjectInvitationService invitations;
     @MockBean VerificationService verification;
     @MockBean UserService users;
     @MockBean ProjectService projects;
@@ -442,8 +443,8 @@ class ApiRegressionTest {
     @Test void memberMutationRoutesUseCorrectParticipants() throws Exception {
         allowMemberWrite(10);
         mvc.perform(post("/api/projects/10/members").header("Authorization", bearer()).contentType(MediaType.APPLICATION_JSON)
-                .content("{\"userId\":2,\"roleId\":7}")) .andExpect(status().isOk());
-        verify(members).addMember(eq(10), argThat(r -> r.getUserId() == 2 && r.getRoleId() == 7));
+                .content("{\"userId\":2,\"roleId\":7}")).andExpect(status().isAccepted());
+        verify(invitations).create(eq(10), any(), isNull(), eq(2), eq(7));
         mvc.perform(delete("/api/projects/10/members/2").header("Authorization", bearer())).andExpect(status().isOk());
         verify(members).removeMember(10, 2);
     }

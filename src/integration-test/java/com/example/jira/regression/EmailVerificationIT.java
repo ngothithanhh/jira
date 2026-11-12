@@ -43,6 +43,7 @@ import static org.assertj.core.api.Assertions.*;
         "spring.jpa.properties.hibernate.default_schema=verification_e1", "spring.datasource.hikari.schema=verification_e1",
         "app.jwt.secret=" + SecurityRegressionTest.SECRET, "app.jwt.expiration=600000",
         "app.mail.enabled=true", "app.mail.provider=brevo", "app.mail.poll-delay-ms=250",
+        "app.public-base-url=http://127.0.0.1:3172",
         "app.mail.encryption-key=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
         "app.verification.hmac-key=AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
         "BREVO_API_KEY=e1-test-unused-provider-bean", "BREVO_SENDER_EMAIL=sender@example.test",
@@ -90,6 +91,9 @@ class EmailVerificationIT {
         db.execute(Files.readString(Path.of("scripts/migrations/011_mail_outbox.sql")));
         db.execute(Files.readString(Path.of(MIGRATION)));
         db.execute(Files.readString(Path.of(MIGRATION)));
+        String invitations = Files.readString(Path.of("scripts/migrations/013_project_invitations.sql"));
+        db.execute(invitations);
+        db.execute(invitations);
     }
 
     @AfterAll void stopContainer() { if (container != null) container.stop(); }
@@ -296,6 +300,9 @@ class EmailVerificationIT {
         String origin = "http://127.0.0.1:" + fePort;
         String legacy = "browser-legacy-e1@test.invalid";
         seed(legacy);
+        String sender = "browser-sender-e2@test.invalid", recipient = "browser-recipient-e2@test.invalid";
+        verified(sender);
+        verified(recipient);
         var next = new ProcessBuilder(node, frontend.resolve("node_modules/next/dist/bin/next").toString(), "start",
                 "--hostname", "127.0.0.1", "--port", Integer.toString(fePort))
                 .directory(frontend.toFile()).redirectErrorStream(true).redirectOutput(Path.of("target/e1-next.log").toFile());
@@ -315,6 +322,18 @@ class EmailVerificationIT {
                 assertThat(browser.waitFor(85, TimeUnit.SECONDS)).isTrue();
                 assertThat(browser.exitValue()).as("Chromium result; see target/e1-browser.log").isZero();
             } finally { if (browser.isAlive()) browser.destroyForcibly(); }
+            var invites = new ProcessBuilder(node, frontend.resolve("tests/connected-project-invitations.browser.cjs").toString())
+                    .directory(frontend.toFile()).redirectErrorStream(true).redirectOutput(Path.of("target/e2-browser.log").toFile());
+            invites.environment().put("E2_ORIGIN", origin);
+            invites.environment().put("E2_FAKE_MAIL", brevo.base());
+            invites.environment().put("E2_SENDER", sender);
+            invites.environment().put("E2_RECIPIENT", recipient);
+            invites.environment().put("E2_PASSWORD", PASSWORD);
+            var invitationBrowser = invites.start();
+            try {
+                assertThat(invitationBrowser.waitFor(85, TimeUnit.SECONDS)).isTrue();
+                assertThat(invitationBrowser.exitValue()).as("Chromium invitation result; see target/e2-browser.log").isZero();
+            } finally { if (invitationBrowser.isAlive()) invitationBrowser.destroyForcibly(); }
         } finally {
             server.descendants().forEach(ProcessHandle::destroy);
             server.destroy();
@@ -342,6 +361,232 @@ class EmailVerificationIT {
         user.setUserName(email.split("@")[0]);
         user.setPasswordHash(encoder.encode(PASSWORD));
         return users.saveAndFlush(user).getUserId();
+    }
+
+    private int verified(String email) {
+        int id = seed(email);
+        db.update("UPDATE users SET email_verified_at=clock_timestamp() WHERE user_id=?", id);
+        return id;
+    }
+
+    @Test void legacyRouteCreatesPendingAndOnlyVerifiedRecipientCanAcceptOnce() throws Exception {
+        String sender = "legacy-sender-e2@test.invalid", recipient = "legacy-kite-e2@test.invalid";
+        verified(sender);
+        int recipientId = verified(recipient);
+        int lookalike = verified("Legacy-Kite-e2@test.invalid");
+        String owner = login(sender, PASSWORD), receiver = login(recipient, PASSWORD);
+        int project = project(owner, "E2LEGACY");
+        int developer = projectRole("DEVELOPER");
+        String projectPath = "/api/projects/" + project;
+        var pending = call("POST", projectPath + "/members", owner, Map.of("userId", recipientId, "roleId", developer), 202);
+        String id = pending.path("invitationId").asText();
+        assertThat(pending.path("state").asText()).isEqualTo("PENDING");
+        assertThat(pending.has("tokenHash")).isFalse();
+        assertThat(call("GET", projectPath + "/members", owner, null, 200)).hasSize(1);
+        call("GET", projectPath, receiver, null, 403);
+        String target = "/api/account/project-invitations/" + id;
+        assertThat(call("GET", target, receiver, null, 200).has("projectId")).isFalse();
+        assertThat(call("GET", "/api/account/project-invitations", receiver, null, 200).path("items").get(0).path("invitationId").asText()).isEqualTo(id);
+        assertThat(call("GET", "/api/notifications", receiver, null, 200).get(0).path("invitationId").asText()).isEqualTo(id);
+        call("POST", target + "/accept", owner, null, 403);
+        assertThat(lookalike).isPositive();
+        call("POST", target + "/accept", login("Legacy-Kite-e2@test.invalid", PASSWORD), null, 403);
+        var a = http.sendAsync(request("POST", target + "/accept", receiver, null), HttpResponse.BodyHandlers.ofString());
+        var b = http.sendAsync(request("POST", target + "/accept", receiver, null), HttpResponse.BodyHandlers.ofString());
+        assertThat(List.of(a.get(12, TimeUnit.SECONDS).statusCode(), b.get(12, TimeUnit.SECONDS).statusCode())).containsOnly(200);
+        assertThat(call("GET", projectPath + "/members", owner, null, 200)).hasSize(2);
+        call("GET", projectPath, receiver, null, 200);
+        call("POST", target + "/decline", receiver, null, 409);
+        assertThat(db.queryForObject("SELECT count(*) FROM audit_logs WHERE entity_id=? AND action='INVITE_ACCEPTED'", Integer.class, project)).isEqualTo(1);
+    }
+
+    @Test void resendRevokesOldProofAndRevocationSerializesWithAcceptance() throws Exception {
+        String sender = "resend-sender-e2@test.invalid", recipient = "resend-recipient-e2@test.invalid";
+        verified(sender);
+        verified(recipient);
+        String owner = login(sender, PASSWORD), receiver = login(recipient, PASSWORD);
+        int project = project(owner, "E2RESEND");
+        var invite = invite(project, owner, recipient, 201);
+        UUID id = UUID.fromString(invite.path("invitationId").asText());
+        String manage = "/api/projects/" + project + "/invitations/" + id;
+        String target = "/api/account/project-invitations/" + id;
+        URI first = URI.create(brevo.awaitInvitation(recipient, 1));
+        assertThat(first.getPort()).isEqualTo(3172);
+        call("POST", manage + "/resend", owner, null, 429);
+        db.update("UPDATE project_invitations SET resend_after=clock_timestamp()-interval '1 second' WHERE invitation_id=?", id);
+        call("POST", manage + "/resend", owner, null, 202);
+        URI second = URI.create(brevo.awaitInvitation(recipient, 2));
+        assertThat(second.getFragment()).isNotEqualTo(first.getFragment());
+        assertThat(linkAction(target + "/accept", receiver, first, "POST")).isEqualTo(410);
+        assertThat(linkAction(target, receiver, second, "GET")).isEqualTo(200);
+        var revoke = http.sendAsync(request("POST", manage + "/revoke", owner, null), HttpResponse.BodyHandlers.ofString());
+        var accept = http.sendAsync(request("POST", target + "/accept", receiver, null), HttpResponse.BodyHandlers.ofString());
+        int revoked = revoke.get(12, TimeUnit.SECONDS).statusCode(), accepted = accept.get(12, TimeUnit.SECONDS).statusCode();
+        assertThat(List.of(revoked + "/" + accepted)).containsAnyOf("204/410", "409/200");
+        assertThat(call("GET", "/api/projects/" + project + "/members", owner, null, 200)).hasSize(accepted == 200 ? 2 : 1);
+    }
+
+    @Test void legacyVerificationAndExpiryKeepPendingOutsideMembership() throws Exception {
+        String sender = "expiry-sender-e2@test.invalid", recipient = "expiry-recipient-e2@test.invalid";
+        verified(sender);
+        int recipientId = seed(recipient);
+        String owner = login(sender, PASSWORD), receiver = login(recipient, PASSWORD);
+        int project = project(owner, "E2EXPIRY");
+        var invite = invite(project, owner, recipient, 201);
+        String id = invite.path("invitationId").asText(), target = "/api/account/project-invitations/" + id;
+        assertThat(call("POST", target + "/accept", receiver, null, 403).path("code").asText()).isEqualTo("EMAIL_VERIFICATION_REQUIRED");
+        var challenge = call("POST", ACCOUNT + "/request", receiver, null, 202);
+        verify(ACCOUNT, receiver, challenge, brevo.awaitCode(recipient, 1), 204);
+        db.update("UPDATE project_invitations SET created_at=clock_timestamp()-interval '2 days',expires_at=clock_timestamp()-interval '1 day' WHERE invitation_id=?", UUID.fromString(id));
+        assertThat(call("GET", target, receiver, null, 200).path("state").asText()).isEqualTo("EXPIRED");
+        call("POST", target + "/accept", receiver, null, 410);
+        assertThat(db.queryForObject("SELECT count(*) FROM project_members WHERE project_id=? AND user_id=?", Integer.class, project, recipientId)).isZero();
+        var replacement = invite(project, owner, recipient, 201);
+        String next = "/api/account/project-invitations/" + replacement.path("invitationId").asText();
+        call("POST", next + "/decline", receiver, null, 204);
+        call("POST", next + "/decline", receiver, null, 204);
+        call("POST", next + "/accept", receiver, null, 410);
+    }
+
+    @Test void disabledInviterRevokesAndAuditFailureRollsBackCreateAndAccept() throws Exception {
+        String sender = "audit-sender-e2@test.invalid", recipient = "audit-recipient-e2@test.invalid";
+        int inviter = verified(sender);
+        verified(recipient);
+        String owner = login(sender, PASSWORD), receiver = login(recipient, PASSWORD);
+        int project = project(owner, "E2AUDIT");
+        rejectInviteAudit("INVITE_CREATED");
+        try {
+            int outbox = count("mail_outbox");
+            invite(project, owner, recipient, 500);
+            assertThat(count("mail_outbox")).isEqualTo(outbox);
+            assertThat(db.queryForObject("SELECT count(*) FROM project_invitations WHERE project_id=?", Integer.class, project)).isZero();
+        } finally { removeInviteAuditTrigger(); }
+        var invitation = invite(project, owner, recipient, 201);
+        String target = "/api/account/project-invitations/" + invitation.path("invitationId").asText();
+        rejectInviteAudit("INVITE_ACCEPTED");
+        try {
+            call("POST", target + "/accept", receiver, null, 500);
+            assertThat(call("GET", target, receiver, null, 200).path("state").asText()).isEqualTo("PENDING");
+            call("GET", "/api/projects/" + project, receiver, null, 403);
+        } finally { removeInviteAuditTrigger(); }
+        db.update("UPDATE users SET enabled=false WHERE user_id=?", inviter);
+        assertThat(call("POST", target + "/accept", receiver, null, 410).path("code").asText()).isEqualTo("INVITER_NO_LONGER_AUTHORIZED");
+        assertThat(call("GET", target, receiver, null, 200).path("state").asText()).isEqualTo("REVOKED");
+    }
+
+    @Test void newEmailReceivesOneInvitationAndCanJoinAfterOtpRegistration() throws Exception {
+        String sender = "new-email-sender-e2@test.invalid", recipient = "new-email-recipient-e2@test.invalid";
+        verified(sender);
+        String owner = login(sender, PASSWORD);
+        int project = project(owner, "E2NEW");
+        String path = "/api/projects/" + project + "/invitations";
+        int role = projectRole("DEVELOPER");
+        var first = http.sendAsync(request("POST", path, owner, Map.of("email", recipient, "roleId", role)), HttpResponse.BodyHandlers.ofString());
+        var second = http.sendAsync(request("POST", path, owner, Map.of("email", recipient.toUpperCase(java.util.Locale.ROOT), "roleId", role)), HttpResponse.BodyHandlers.ofString());
+        var a = first.get(12, TimeUnit.SECONDS);
+        var b = second.get(12, TimeUnit.SECONDS);
+        assertThat(List.of(a.statusCode(), b.statusCode())).containsExactlyInAnyOrder(201, 409);
+        String id = json.readTree(a.statusCode() == 201 ? a.body() : b.body()).path("invitationId").asText();
+        assertThat(users.findByEmail(recipient)).isEmpty();
+        URI link = URI.create(brevo.awaitInvitation(recipient, 1));
+        assertThat(link.getPath()).endsWith(id);
+        assertThat(call("GET", "/api/projects/" + project + "/members", owner, null, 200)).hasSize(1);
+        var challenge = register(recipient, PASSWORD, "e2-new-recipient", 202);
+        verify(AUTH, null, challenge, brevo.awaitCode(recipient, 1), 204);
+        String receiver = login(recipient, PASSWORD);
+        assertThat(linkAction("/api/account/project-invitations/" + id + "/accept", receiver, link, "POST")).isEqualTo(200);
+    }
+
+    @Test void concurrentPendingManagerInvitationsCanCreateOnlyOneManager() throws Exception {
+        String sender = "pm-sender-e2@test.invalid", first = "first-pm-e2@test.invalid", second = "second-pm-e2@test.invalid";
+        verified(sender);
+        verified(first);
+        verified(second);
+        String owner = login(sender, PASSWORD);
+        int project = project(owner, "E2PM");
+        int manager = projectRole("PROJECT_MANAGER");
+        String path = "/api/projects/" + project + "/invitations";
+        call("POST", path, owner, Map.of("email", first, "roleId", manager), 409);
+        db.update("DELETE FROM project_members WHERE project_id=?", project); // Fixture legacy có lead và chưa có PM membership.
+        String idA = call("POST", path, owner, Map.of("email", first, "roleId", manager), 201).path("invitationId").asText();
+        String idB = call("POST", path, owner, Map.of("email", second, "roleId", manager), 201).path("invitationId").asText();
+        String actorA = login(first, PASSWORD), actorB = login(second, PASSWORD);
+        var a = http.sendAsync(request("POST", "/api/account/project-invitations/" + idA + "/accept", actorA, null), HttpResponse.BodyHandlers.discarding());
+        var b = http.sendAsync(request("POST", "/api/account/project-invitations/" + idB + "/accept", actorB, null), HttpResponse.BodyHandlers.discarding());
+        assertThat(List.of(a.get(12, TimeUnit.SECONDS).statusCode(), b.get(12, TimeUnit.SECONDS).statusCode())).containsExactlyInAnyOrder(200, 409);
+        assertThat(db.queryForObject("SELECT count(*) FROM project_members WHERE project_id=? AND role_id=?", Integer.class, project, manager)).isEqualTo(1);
+    }
+
+    @Test void declineAndResendContendWithAcceptWithoutOverwritingTheWinner() throws Exception {
+        String sender = "decision-sender-e2@test.invalid", first = "decision-one-e2@test.invalid", second = "decision-two-e2@test.invalid";
+        verified(sender);
+        verified(first);
+        verified(second);
+        String owner = login(sender, PASSWORD), actorA = login(first, PASSWORD), actorB = login(second, PASSWORD);
+        int project = project(owner, "E2DECIDE");
+        String idA = invite(project, owner, first, 201).path("invitationId").asText();
+        String accountA = "/api/account/project-invitations/" + idA;
+        var acceptA = http.sendAsync(request("POST", accountA + "/accept", actorA, null), HttpResponse.BodyHandlers.discarding());
+        var decline = http.sendAsync(request("POST", accountA + "/decline", actorA, null), HttpResponse.BodyHandlers.discarding());
+        assertThat(List.of(acceptA.get(12, TimeUnit.SECONDS).statusCode() + "/" + decline.get(12, TimeUnit.SECONDS).statusCode()))
+                .containsAnyOf("200/409", "410/204");
+        String idB = invite(project, owner, second, 201).path("invitationId").asText();
+        URI link = URI.create(brevo.awaitInvitation(second, 1));
+        db.update("UPDATE project_invitations SET resend_after=clock_timestamp()-interval '1 second' WHERE invitation_id=?", UUID.fromString(idB));
+        var resend = http.sendAsync(request("POST", "/api/projects/" + project + "/invitations/" + idB + "/resend", owner, null),
+                HttpResponse.BodyHandlers.discarding());
+        int accepted = linkAction("/api/account/project-invitations/" + idB + "/accept", actorB, link, "POST");
+        assertThat(List.of(accepted + "/" + resend.get(12, TimeUnit.SECONDS).statusCode())).containsAnyOf("200/409", "410/202");
+    }
+
+    @Test void inviterWhoseRoleLostAddMemberCannotGrantAccess() throws Exception {
+        String sender = "permission-sender-e2@test.invalid", inviter = "permission-inviter-e2@test.invalid",
+                recipient = "permission-recipient-e2@test.invalid";
+        verified(sender);
+        int inviterId = verified(inviter);
+        verified(recipient);
+        int project = project(login(sender, PASSWORD), "E2PERM");
+        String actor = login(inviter, PASSWORD), receiver = login(recipient, PASSWORD);
+        int role = db.queryForObject("INSERT INTO user_roles(role_name) VALUES ('E2_INVITER') RETURNING role_id", Integer.class);
+        int permission = db.queryForObject("SELECT permission_id FROM permissions WHERE permission_name='ADD_MEMBER'", Integer.class);
+        db.update("INSERT INTO role_permissions(role_id,permission_id) VALUES (?,?)", role, permission);
+        db.update("INSERT INTO project_members(project_id,user_id,role_id,assigned_at) VALUES (?,?,?,clock_timestamp())",
+                project, inviterId, role);
+        String id = invite(project, actor, recipient, 201).path("invitationId").asText();
+        db.update("DELETE FROM role_permissions WHERE role_id=? AND permission_id=?", role, permission);
+        assertThat(call("POST", "/api/account/project-invitations/" + id + "/accept", receiver, null, 410).path("code").asText())
+                .isEqualTo("INVITER_NO_LONGER_AUTHORIZED");
+        call("GET", "/api/projects/" + project, receiver, null, 403);
+    }
+
+    private void rejectInviteAudit(String action) {
+        db.execute("CREATE FUNCTION reject_e2_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='"
+                + action + "' THEN RAISE EXCEPTION 'E2 audit fixture'; END IF; RETURN NEW; END $$;"
+                + "CREATE TRIGGER reject_e2_audit BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION reject_e2_audit()");
+    }
+
+    private void removeInviteAuditTrigger() {
+        db.execute("DROP TRIGGER reject_e2_audit ON audit_logs; DROP FUNCTION reject_e2_audit()");
+    }
+
+    private int project(String token, String key) throws Exception {
+        return call("POST", "/api/projects/create", token, Map.of("projectName", key, "projectKey", key), 200).path("projectId").asInt();
+    }
+
+    private int projectRole(String name) {
+        return db.queryForObject("SELECT role_id FROM user_roles WHERE role_name=?", Integer.class, name);
+    }
+
+    private JsonNode invite(int project, String token, String email, int expected) throws Exception {
+        return call("POST", "/api/projects/" + project + "/invitations", token, Map.of("email", email, "roleId", projectRole("DEVELOPER")), expected);
+    }
+
+    private int linkAction(String path, String actor, URI link, String method) throws Exception {
+        var request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path + "?link=true"))
+                .header("Authorization", "Bearer " + actor)
+                .header("X-Jira-Invitation-Proof", link.getFragment().substring(6))
+                .method(method, HttpRequest.BodyPublishers.noBody()).build();
+        return http.send(request, HttpResponse.BodyHandlers.discarding()).statusCode();
     }
 
     private int count(String table) { return db.queryForObject("SELECT count(*) FROM " + table, Integer.class); }

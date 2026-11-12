@@ -123,7 +123,6 @@ class ProjectRegressionTest {
         @Mock UserRoleAssignmentRepository assignments;
         @Mock ProjectSecurity security;
         @Mock AuditLogService audit;
-        @Mock NotificationService notifications;
         @InjectMocks ProjectMemberServiceImpl service;
         // Đổi role project giữ thời điểm tham gia và không cấp role toàn cục.
         @Test void memberRoleUpdatePreservesAssignedAt() {
@@ -137,42 +136,6 @@ class ProjectRegressionTest {
             when(members.findByProject_ProjectIdAndUser_UserId(10,2)).thenReturn(Optional.of(new ProjectMember()));
             when(roles.findByRoleId(7)).thenReturn(Optional.of(Fixtures.role(7,"SYSTEM_ADMIN")));
             assertThatThrownBy(() -> service.updateRole(10,2,7)).isInstanceOf(com.example.jira.exception.ConflictException.class); verify(members,never()).save(any());
-        }
-        // Thiếu ADD_MEMBER dừng trước khi đọc user và role.
-        @Test void deniedAddDoesNotReadOrWriteMember() {
-            assertThatThrownBy(() -> service.addMember(10, new AddMemberRequest())).hasMessageContaining("quyền");
-            verify(members).findByProject_ProjectIdAndUser_UserId(10,1);
-            verify(members,never()).save(any());verifyNoInteractions(users,roles,notifications);
-        }
-        @Test void actorMembershipRefreshesAfterLockBeforePermissionCheck() {
-            var actor=new ProjectMember();
-            when(members.findByProject_ProjectIdAndUser_UserId(10,1)).thenReturn(Optional.of(actor));
-            assertThatThrownBy(()->service.addMember(10,new AddMemberRequest())).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
-            var order=inOrder(projects,entityManager,members,security);
-            order.verify(projects).findByIdForUpdate(10);order.verify(entityManager).refresh(any(Project.class));
-            order.verify(members).findByProject_ProjectIdAndUser_UserId(10,1);order.verify(entityManager).refresh(actor);
-            order.verify(security).hasPermission(10,PermissionName.ADD_MEMBER);
-            verifyNoInteractions(users,roles,notifications,audit);
-        }
-        // Thêm thành viên gắn đúng user/role/project, thông báo gửi tới user được thêm.
-        @Test void addPersistsMembershipAndNotifiesNewMember() {
-            prepareAdd("DEVELOPER"); var r = request(); service.addMember(10, r);
-            verify(members).save(argThat(m -> m.getId().equals(new ProjectMemberId(10, 2))
-                    && m.getRole().getRoleId() == 7 && m.getAssignedAt() != null));
-            verify(notifications).sendNotification(eq(2), isNull(), eq(1), eq(NotificationType.PROJECT_INVITED), anyString());
-            verify(audit).logAction(eq("ADD_MEMBER"), eq(EntityType.PROJECT), eq(10), anyString());
-        }
-        // Thành viên đã có không được thêm lần thứ hai.
-        @Test void duplicateMemberIsRejected() {
-            prepareAdd("DEVELOPER"); when(members.existsById(new ProjectMemberId(10, 2))).thenReturn(true);
-            assertThatThrownBy(() -> service.addMember(10, request())).hasMessageContaining("đã có");
-            verify(members, never()).save(any()); verifyNoInteractions(notifications);
-        }
-        // Project có PM rồi không được thêm PM thứ hai.
-        @Test void secondProjectManagerIsRejected() {
-            prepareAdd("PROJECT_MANAGER"); when(members.countOtherProjectManagers(10,2)).thenReturn(1L);
-            assertThatThrownBy(() -> service.addMember(10, request())).hasMessageContaining("MANAGER");
-            verify(members, never()).save(any());
         }
         // Gỡ thành viên chỉ xóa cặp project/user được yêu cầu.
         @Test void removeUsesCompositeIdAndRecordsAudit() {
@@ -193,13 +156,6 @@ class ProjectRegressionTest {
             assertThatThrownBy(() -> service.getMembers(10)).isInstanceOf(RuntimeException.class);
             verifyNoInteractions(members);
         }
-        // Cấu hình dữ liệu đọc của addMember; chưa ghi DB thật ở unit test.
-        private void prepareAdd(String role) {
-            when(security.hasPermission(10, PermissionName.ADD_MEMBER)).thenReturn(true);
-            when(users.findById(2)).thenReturn(Optional.of(Fixtures.user(2)));
-            when(roles.findByRoleId(7)).thenReturn(Optional.of(Fixtures.role(7, role)));
-        }
-        private AddMemberRequest request() { var r = new AddMemberRequest(); r.setUserId(2); r.setRoleId(7); return r; }
     }
     @Nested @ExtendWith(MockitoExtension.class)
     class Users {

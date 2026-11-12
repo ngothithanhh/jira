@@ -28,6 +28,9 @@ public class Notification {
     @JoinColumn(name = "issue_id")
     private Issue issue;
 
+    @Column(name = "invitation_id")
+    private java.util.UUID invitationId;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "actor_id")
     private User actor;

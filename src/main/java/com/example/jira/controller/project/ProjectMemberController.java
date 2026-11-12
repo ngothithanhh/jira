@@ -1,6 +1,5 @@
 package com.example.jira.controller.project;
 
-import com.example.jira.dto.project.AddMemberRequest;
 import com.example.jira.dto.project.MemberCandidate;
 import com.example.jira.dto.project.ProjectMemberResponse;
 import com.example.jira.service.AuthService;
@@ -38,12 +37,6 @@ public class ProjectMemberController {
     public void updateRole(@PathVariable @Positive int projectId, @PathVariable @Positive int userId, @Valid @RequestBody ChangeRoleRequest body) {
         requirePermission(projectId, PermissionName.ADD_MEMBER);
         projectMemberService.updateRole(projectId,userId,body.roleId());
-    }
-
-    @PostMapping
-    public void addMember(@PathVariable @Positive int projectId, @Valid @RequestBody AddMemberRequest request) {
-        requirePermission(projectId, PermissionName.ADD_MEMBER);
-        projectMemberService.addMember(projectId, request);
     }
 
     @GetMapping

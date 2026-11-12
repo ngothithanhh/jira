@@ -14,7 +14,7 @@ import java.util.Locale;
 import java.util.UUID;
 
 @Component
-class VerificationSecrets {
+public class VerificationSecrets {
     private final SecureRandom random = new SecureRandom();
     private final SecretKeySpec key;
 
@@ -34,6 +34,10 @@ class VerificationSecrets {
     }
 
     boolean configured() { return key != null; }
+
+    public byte[] invitationQuotaSubject(String keyValue) {
+        return key == null ? null : subject("project-invitation", keyValue);
+    }
 
     String proof() {
         byte[] raw = new byte[32];
