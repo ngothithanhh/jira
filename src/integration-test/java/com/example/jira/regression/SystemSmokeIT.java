@@ -161,6 +161,34 @@ class SystemSmokeIT {
         call("POST","/api/user-role",other,Map.of("roleName","NO_ADMIN"),403);
     }
 
+
+    /** HTTP thật chứng minh GET/PUT matrix, stale409 và scope được bảo vệ ở BE, không chỉ BFF. */
+    @Test void rolePermissionMatrixUsesOneAtomicPutAndProtectsDirectApi()throws Exception{
+        var admin=Fixtures.user(0);admin.setEmail("matrix-admin@test.invalid");admin.setPasswordHash(encoder.encode("matrix-password"));admin=users.saveAndFlush(admin);
+        var sys=roles.findByRoleName("SYSTEM_ADMIN").orElseThrow();
+        var assignment=new UserRoleAssignment();assignment.setId(new UserRoleAssignmentId(admin.getUserId(),sys.getRoleId()));assignment.setUser(admin);assignment.setRole(sys);assignments.saveAndFlush(assignment);
+        String token=login(admin.getEmail(),"matrix-password");
+        call("GET","/api/admin/role-permissions",null,null,401);
+        var matrix=call("GET","/api/admin/role-permissions",token,null,200);
+        assertThat(matrix.path("roles").isArray()).isTrue();assertThat(matrix.path("permissions").isArray()).isTrue();
+        int role=call("POST","/api/user-role",token,Map.of("roleName","MATRIX_HTTP"),201).path("role").asInt();
+        int edit=0,global=0;for(var p:matrix.path("permissions")){
+            if(p.path("permissionName").asText().equals("EDIT_ISSUE"))edit=p.path("permissionId").asInt();
+            if(p.path("permissionName").asText().equals("DELETE_USER"))global=p.path("permissionId").asInt();
+        }
+        assertThat(edit).isPositive();
+        var snapshot=call("PUT","/api/roles/"+role+"/permissions",token,Map.of("expectedPermissionIds",List.of(),"permissionIds",List.of(edit)),200);
+        assertThat(snapshot.path("permissionIds").get(0).asInt()).isEqualTo(edit);
+        call("PUT","/api/roles/"+role+"/permissions",token,Map.of("expectedPermissionIds",List.of(),"permissionIds",List.of()),409);
+        call("PUT","/api/roles/"+role+"/permissions",token,Map.of("expectedPermissionIds",List.of(edit),"permissionIds",List.of(global)),400);
+        call("PUT","/api/roles/"+role+"/permissions",token,Map.of("expectedPermissionIds",List.of(edit),"permissionIds",List.of("1")),400);
+        call("PUT","/api/roles/"+role+"/permissions",token,Map.of("expectedPermissionIds",List.of(edit),"permissionIds",List.of(1.5)),400);
+        call("PUT","/api/roles/"+sys.getRoleId()+"/permissions",token,Map.of("expectedPermissionIds",List.of(),"permissionIds",List.of()),409);
+        call("PUT","/api/roles/"+role+"/permissions",token,Map.of("expectedPermissionIds",List.of(edit),"permissionIds",List.of()),200);
+        assertThat(call("GET","/api/roles/"+role+"/permissions",token,null,200).path("permissionIds").isEmpty()).isTrue();
+        call("DELETE","/api/user-role/"+role,token,null,204);
+    }
+
     /** Swagger phải sinh contract khi có advice/record DTO mới, không chỉ nạp được trang UI. */
     @Test void generatedOpenApiContainsNewRoutesAndBearerScheme() throws Exception {
         JsonNode spec=call("GET","/v3/api-docs",null,null,200);

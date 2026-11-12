@@ -59,34 +59,47 @@ public class DatabaseSeeder implements CommandLineRunner {
         Permission manageSprint = seedPermission(PermissionName.MANAGE_SPRINT);
         seedPermission(PermissionName.CREATE_ISSUE_TYPE);
 
-        UserRole systemAdmin = seedRole("SYSTEM_ADMIN");
-        assignPermissionToRole(systemAdmin, createProject);
-        assignPermissionToRole(systemAdmin, updateProject);
-        assignPermissionToRole(systemAdmin, deleteProject);
-        assignPermissionToRole(systemAdmin, deleteUser);
+        // Chỉ gán default khi chính role vừa được tạo, không coi tập grant rỗng là dữ liệu thiếu.
+        var systemAdminSeed = seedRole("SYSTEM_ADMIN");
+        UserRole systemAdmin = systemAdminSeed.role();
+        if (systemAdminSeed.createdNow()) {
+            assignPermissionToRole(systemAdmin, createProject);
+            assignPermissionToRole(systemAdmin, updateProject);
+            assignPermissionToRole(systemAdmin, deleteProject);
+            assignPermissionToRole(systemAdmin, deleteUser);
+        }
 
-        UserRole projectManager = seedRole("PROJECT_MANAGER");
-        assignPermissionToRole(projectManager, updateProject);
-        assignPermissionToRole(projectManager, viewProject);
-        assignPermissionToRole(projectManager, addMember);
-        assignPermissionToRole(projectManager, deleteMember);
-        assignPermissionToRole(projectManager, createIssue);
-        assignPermissionToRole(projectManager, editIssue);
-        assignPermissionToRole(projectManager, deleteIssue);
-        assignPermissionToRole(projectManager, manageBoard);
-        assignPermissionToRole(projectManager, manageSprint);
+        var projectManagerSeed = seedRole("PROJECT_MANAGER");
+        UserRole projectManager = projectManagerSeed.role();
+        if (projectManagerSeed.createdNow()) {
+            assignPermissionToRole(projectManager, updateProject);
+            assignPermissionToRole(projectManager, viewProject);
+            assignPermissionToRole(projectManager, addMember);
+            assignPermissionToRole(projectManager, deleteMember);
+            assignPermissionToRole(projectManager, createIssue);
+            assignPermissionToRole(projectManager, editIssue);
+            assignPermissionToRole(projectManager, deleteIssue);
+            assignPermissionToRole(projectManager, manageBoard);
+            assignPermissionToRole(projectManager, manageSprint);
+        }
 
-        UserRole scrumMaster = seedRole("SCRUM_MASTER");
-        assignPermissionToRole(scrumMaster, viewProject);
-        assignPermissionToRole(scrumMaster, manageBoard);
-        assignPermissionToRole(scrumMaster, manageSprint);
-        assignPermissionToRole(scrumMaster, createIssue);
-        assignPermissionToRole(scrumMaster, editIssue);
+        var scrumMasterSeed = seedRole("SCRUM_MASTER");
+        UserRole scrumMaster = scrumMasterSeed.role();
+        if (scrumMasterSeed.createdNow()) {
+            assignPermissionToRole(scrumMaster, viewProject);
+            assignPermissionToRole(scrumMaster, manageBoard);
+            assignPermissionToRole(scrumMaster, manageSprint);
+            assignPermissionToRole(scrumMaster, createIssue);
+            assignPermissionToRole(scrumMaster, editIssue);
+        }
 
-        UserRole developer = seedRole("DEVELOPER");
-        assignPermissionToRole(developer, viewProject);
-        assignPermissionToRole(developer, createIssue);
-        assignPermissionToRole(developer, editIssue);
+        var developerSeed = seedRole("DEVELOPER");
+        UserRole developer = developerSeed.role();
+        if (developerSeed.createdNow()) {
+            assignPermissionToRole(developer, viewProject);
+            assignPermissionToRole(developer, createIssue);
+            assignPermissionToRole(developer, editIssue);
+        }
 
         seedDefaultAdmin(systemAdmin);
     }
@@ -103,13 +116,15 @@ public class DatabaseSeeder implements CommandLineRunner {
         });
     }
 
-    private UserRole seedRole(String roleName) {
-        return roleRepository.findByRoleName(roleName).orElseGet(() -> {
-            UserRole role = new UserRole();
-            role.setRoleName(roleName);
-            log.info("Seeded {} role.", roleName);
-            return roleRepository.save(role);
-        });
+    private record SeededRole(UserRole role,boolean createdNow) {}
+    /** Tra đúng mã role; chỉ role mới tạo nhận default, role đã cấu hình giữ nguyên kể cả rỗng. */
+    private SeededRole seedRole(String roleName) {
+        var existing=roleRepository.findByRoleName(roleName);
+        if(existing.isPresent())return new SeededRole(existing.get(),false);
+        var role=new UserRole();role.setRoleName(roleName);
+        role=roleRepository.save(role);
+        log.info("Seeded {} role.",roleName);
+        return new SeededRole(role,true);
     }
 
     private void migrateLegacyPermission(String legacyName, PermissionName canonicalName) {

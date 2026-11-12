@@ -38,6 +38,7 @@ import static org.assertj.core.api.Assertions.*;
         "app.jwt.secret=" + SecurityRegressionTest.SECRET, "app.jwt.expiration=60000"})
 @Import({SecurityConfig.class, JwtUtil.class, CorsConfig.class})
 class ApiRegressionTest {
+    @MockBean com.example.jira.service.impl.AdminRolePermissionQueryService rolePermissionQuery;
     @Autowired MockMvc mvc;
     @Autowired JwtUtil jwt;
     @MockBean CustomUserDetailsService details;

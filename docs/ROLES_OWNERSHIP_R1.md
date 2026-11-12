@@ -1,5 +1,7 @@
 # Role R1 và quyền sở hữu project P1
 
+R2 ma trận quyền và seed giữ cấu hình đã được bổ sung; xem [ROLE_PERMISSIONS_R2.md](ROLE_PERMISSIONS_R2.md). Các ghi chú “R2 chưa triển khai” bên dưới mô tả mốc bàn giao R1.
+
 ## Hành vi
 
 - Tài khoản đã xác thực và còn hoạt động được CREATE_PROJECT dù không có assignment global.

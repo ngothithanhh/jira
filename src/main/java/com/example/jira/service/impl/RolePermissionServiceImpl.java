@@ -16,6 +16,54 @@ public class RolePermissionServiceImpl implements RolePermissionService {
     private final RolePermissionRepository rolePermissionRepository;
     private final AuditLogService audit;
 
+    /**
+     * Admin lưu toàn bộ grant của roleId từ user_roles. expected là tập lúc mở form, desired là các permissions ID muốn giữ.
+     * Khóa/recheck actor rồi target role; mọi kiểm tra hoàn tất trước delete/insert, audit cùng transaction để lỗi rollback cả set.
+     */
+    @Override public com.example.jira.dto.admin.RolePermissionData.RoleSnapshot replacePermissions(int roleId,
+            com.example.jira.dto.admin.RolePermissionData.ReplaceRequest request){
+        adminLock.begin();var role=adminLock.target(roleId);
+        if(RolePolicy.system(role.getRoleName()))throw new ConflictException("SYSTEM_ADMIN luôn toàn quyền");
+        // Chặn caller nội bộ giống API: không nhận null, ID âm, trùng hoặc tập không có giới hạn.
+        if(request==null)throw invalidSet();
+        var expected=checkedIds(request.expectedPermissionIds());
+        var desired=checkedIds(request.permissionIds());
+        var current=new java.util.TreeSet<>(rolePermissionRepository.permissionIds(roleId));
+        var catalog=permissionRepository.findAll();RolePolicy.assertUniquePermissions(catalog);
+        if(!expected.equals(current))throw new ConflictException("Quyền đã được thay đổi; tải cấu hình mới trước khi lưu");
+        var byId=catalog.stream().collect(java.util.stream.Collectors.toMap(Permission::getPermissionId,p->p));
+        for(int id:desired){
+            var permission=byId.get(id);
+            if(permission==null)throw new NotFoundException("Không tìm thấy quyền ID "+id);
+            RolePolicy.projectGrant(role.getRoleName(),permission.getPermissionName());
+        }
+        var removed=new java.util.TreeSet<>(current);removed.removeAll(desired);
+        var added=new java.util.TreeSet<>(desired);added.removeAll(current);
+        // Tập không đổi là no-op sau so expected/validate, không tạo lịch sử thay đổi giả.
+        if(removed.isEmpty()&&added.isEmpty())
+            return new com.example.jira.dto.admin.RolePermissionData.RoleSnapshot(roleId,role.getRoleName(),java.util.List.copyOf(current));
+        if(!removed.isEmpty())rolePermissionRepository.deleteSelected(roleId,removed);
+        var insert=new java.util.ArrayList<RolePermission>();
+        for(int id:added){
+            var grant=new RolePermission();grant.setId(new RolePermissionId(roleId,id));grant.setRole(role);grant.setPermission(byId.get(id));insert.add(grant);
+        }
+        rolePermissionRepository.saveAllAndFlush(insert);
+        audit.logAction("SET_ROLE_PERMISSIONS",EntityType.ROLE,roleId,"Thêm permission IDs "+added+"; gỡ IDs "+removed);
+        return new com.example.jira.dto.admin.RolePermissionData.RoleSnapshot(roleId,role.getRoleName(),java.util.List.copyOf(desired));
+    }
+
+    /** ID từ request thuộc permissions; thứ tự không quan trọng nhưng mỗi ID chỉ xuất hiện một lần. */
+    private java.util.SortedSet<Integer> checkedIds(java.util.List<Integer> ids){
+        if(ids==null||ids.size()>1000||ids.stream().anyMatch(id->id==null||id<=0))throw invalidSet();
+        var set=new java.util.TreeSet<>(ids);
+        if(set.size()!=ids.size())throw invalidSet();
+        return set;
+    }
+    /** Body sai trả400 trước ghi; không mượn409 để che ID/parser không hợp lệ. */
+    private org.springframework.web.server.ResponseStatusException invalidSet(){
+        return new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,"Tập quyền phải gồm các ID nguyên dương không trùng");
+    }
+
     /** API grant cũ: roleId thuộc user_roles, permissionId thuộc permissions; khóa/recheck actor và role trước kiểm phạm vi. */
     @Override public void addPermissionToRole(int roleId,int permissionId){
         adminLock.begin();var role=adminLock.target(roleId);

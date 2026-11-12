@@ -28,10 +28,19 @@ public final class RolePolicy {
     public static boolean supported(String name) {
         return Arrays.stream(PermissionName.values()).anyMatch(p->p.name().equals(name));
     }
+    /** Metadata và writer dùng chung tập quyền có thể cấp theo membership, tránh UI/API lệch policy. */
+    public static boolean assignable(String name) {return supported(name)&&!GLOBAL_ONLY.contains(name);}
+
+    /** Cùng mã canonical phải có một ID; catalog sai thì409, không tự chọn/merge và không ghi DB. */
+    public static void assertUniquePermissions(Collection<com.example.jira.entity.Permission> rows) {
+        Set<String> seen=new HashSet<>();
+        for(var p:rows)if(!seen.add(canonical(p.getPermissionName())))
+            throw new ConflictException("Danh mục quyền có mã trùng; cần kiểm tra dữ liệu trước khi cấu hình");
+    }
     /** Chỉ cấp grant được xét theo role dự án; CREATE_PROJECT là khả năng chung, DELETE_PROJECT theo ownership, không cấp ở đây. */
     public static void projectGrant(String roleName,String permission) {
         if(system(roleName))throw new ConflictException("SYSTEM_ADMIN luôn toàn quyền; không sửa từng quyền của vai trò này");
-        if(!supported(permission)||GLOBAL_ONLY.contains(permission))
+        if(!assignable(permission))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Mã quyền không hợp lệ cho vai trò dự án");
     }
 }

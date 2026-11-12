@@ -63,7 +63,7 @@ class InfrastructureRegressionTest {
                 var p = new Permission(); p.setPermissionName(name); return Optional.of(p);
             });
             when(roles.findByRoleName(anyString())).thenAnswer(inv -> Optional.of(Fixtures.role(7, inv.getArgument(0))));
-            when(grants.existsByRole_RoleIdAndPermission_PermissionId(anyInt(), anyInt())).thenReturn(true);
+            lenient().when(grants.existsByRole_RoleIdAndPermission_PermissionId(anyInt(), anyInt())).thenReturn(true);
             when(users.existsByEmail("admin@jira.com")).thenReturn(true);
             seeder.run();
             verify(roles, never()).save(any()); verify(permissions, never()).save(any());
