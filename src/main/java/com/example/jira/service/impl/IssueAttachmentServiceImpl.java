@@ -1,5 +1,7 @@
 package com.example.jira.service.impl;
 
+import com.example.jira.enums.EntityType;
+
 import com.example.jira.dto.issue.IssueAttachmentResponse;
 import com.example.jira.entity.*;
 import com.example.jira.mapper.IssueAttachmentMapper;
@@ -21,6 +23,7 @@ import java.util.List;
 @Service @RequiredArgsConstructor
 public class IssueAttachmentServiceImpl implements IssueAttachmentService {
     public static final long MAX_FILE_SIZE=10L*1024*1024;
+    private final com.example.jira.service.AuditLogService audit;
     private final IssueAttachmentRepository attachmentRepository;
     private final IssueAttachmentContentRepository contentRepository;
     private final IssueRepository issueRepository;
@@ -52,6 +55,9 @@ public class IssueAttachmentServiceImpl implements IssueAttachmentService {
         attachment.setFilePath("/api/issues/"+issueId+"/attachments/"+attachment.getAttachmentId()+"/content");
         IssueAttachmentContent content=new IssueAttachmentContent();content.setAttachment(attachment);content.setContent(bytes);
         contentRepository.saveAndFlush(content);
+
+        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+        audit.logProjectAction("UPLOAD_ATTACHMENT",EntityType.ATTACHMENT,attachment.getAttachmentId(),issue.getProject().getProjectId(),"Tải tệp lên issue ID "+issueId);
         // Lỗi lưu bytea sẽ rollback cả metadata; không có asset ngoài DB cần bù hoặc retry.
         return IssueAttachmentMapper.toResponse(attachment);
     }
@@ -90,6 +96,8 @@ public class IssueAttachmentServiceImpl implements IssueAttachmentService {
         canDelete(attachment);lock(attachment.getIssue());entityManager.refresh(attachment);canDelete(attachment);
         contentRepository.deleteForAttachment(attachmentId);
         attachmentRepository.delete(attachment);attachmentRepository.flush();
+        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+        audit.logProjectAction("DELETE_ATTACHMENT",EntityType.ATTACHMENT,attachmentId,attachment.getIssue().getProject().getProjectId(),"Xóa tệp của issue ID "+attachment.getIssue().getIssueId());
     }
 
     /** Parent lấy từ DB chứ không lấy issueId người gọi làm quyền cho một attachment khác. */

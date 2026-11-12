@@ -1,5 +1,7 @@
 package com.example.jira.service.impl;
 
+import com.example.jira.enums.EntityType;
+
 import com.example.jira.dto.issue.CreateIssueRequest;
 import com.example.jira.dto.issue.IssueResponse;
 import com.example.jira.dto.issue.UpdateIssueRequest;
@@ -26,6 +28,7 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 public class IssueServiceImpl implements IssueService {
+    private final com.example.jira.service.AuditLogService audit;
     private final ProjectSecurity projectSecurity;
     private final ProjectRepository projectRepository;
     private final IssueTypeRepository issueTypeRepository;
@@ -114,7 +117,10 @@ public class IssueServiceImpl implements IssueService {
         issue.setStoryPoints(0);
 
         // Lưu issue rồi map response trong transaction; lỗi lưu/map đều rollback, không trả kết quả tạo dở.
-        return saveResponse(issue);
+        IssueResponse response = saveResponse(issue);
+        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+        audit.logProjectAction("CREATE_ISSUE",EntityType.ISSUE,issue.getIssueId(),project.getProjectId(),"Tạo issue: "+issue.getIssueKey());
+        return response;
     }
 
     /**
@@ -138,6 +144,11 @@ public class IssueServiceImpl implements IssueService {
 
         // Chờ cùng khóa với reorder; đọc lại entity sau khi lượt trước commit, rồi mới cập nhật từng phần.
         lockAndRefresh(issue);
+        // Chỉ ghi audit khi nội dung thực sự khác; request lặp giữ hành vi lưu/metrics cũ.
+        boolean changed = request.getSummary()!=null && !java.util.Objects.equals(request.getSummary(),issue.getSummary())
+                || request.getDescription()!=null && !java.util.Objects.equals(request.getDescription(),issue.getDescription())
+                || request.getPriority()!=null && !java.util.Objects.equals(request.getPriority(),issue.getPriority())
+                || request.getStoryPoints()!=null && !java.util.Objects.equals(request.getStoryPoints(),issue.getStoryPoints());
         if (request.getSummary() != null) issue.setSummary(request.getSummary());
         if (request.getDescription() != null) issue.setDescription(request.getDescription());
         if (request.getPriority() != null) issue.setPriority(request.getPriority());
@@ -146,6 +157,10 @@ public class IssueServiceImpl implements IssueService {
         IssueResponse response = saveResponse(issue);
         // Estimate thay đổi ảnh hưởng burndown ACTIVE; các trường nội dung khác không tạo điểm report thừa.
         if (request.getStoryPoints() != null) metrics.captureActiveProject(issue.getProject().getProjectId());
+        if (changed) {
+        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+        audit.logProjectAction("UPDATE_ISSUE",EntityType.ISSUE,issueId,issue.getProject().getProjectId(),"Cập nhật issue: "+issue.getIssueKey());
+        }
         return response;
     }
 
@@ -169,6 +184,7 @@ public class IssueServiceImpl implements IssueService {
         // Dùng chung khóa project với backlog và trạng thái; refresh bỏ dữ liệu đọc trước khi chờ khóa.
         lockAndRefresh(issue);
         // Cặp project/user bảo đảm người nhận thuộc dự án của issue, không chỉ tồn tại trong bảng users.
+        Integer previousAssignee = issue.getAssignee()==null?null:issue.getAssignee().getUserId();
         if (assigneeId == null) {
             issue.setAssignee(null);
         } else {
@@ -186,7 +202,12 @@ public class IssueServiceImpl implements IssueService {
 
         // Version của issue chặn hai lượt cùng ghi trên một phiên bản; lỗi sẽ rollback cả thông báo đã tạo.
         issue.setUpdatedAt(LocalDateTime.now());
-        return saveResponse(issue);
+        IssueResponse response = saveResponse(issue);
+        if (!java.util.Objects.equals(previousAssignee,assigneeId)) {
+        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+        audit.logProjectAction("ASSIGN_ISSUE",EntityType.ISSUE,issueId,issue.getProject().getProjectId(),"Người nhận ID: "+previousAssignee+" → "+assigneeId);
+        }
+        return response;
     }
 
     /**
@@ -256,6 +277,9 @@ public class IssueServiceImpl implements IssueService {
         entityManager.flush();
         // Status quyết định remaining points; snapshot cùng transaction để lỗi không để lịch sử/report lệch nhau.
         metrics.captureActiveProject(issue.getProject().getProjectId());
+
+        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+        audit.logProjectAction("CHANGE_STATUS",EntityType.ISSUE,issueId,issue.getProject().getProjectId(),"Trạng thái ID: "+transition.getFromStatus().getStatusId()+" → "+statusId);
         return IssueMapper.toResponse(savedIssue);
     }
 

@@ -35,6 +35,10 @@ public class AuditLog {
     @Column(name = "entity_id")
     private int entityId;
 
+    // Chụp project sở hữu lúc ghi; không đặt FK để lịch sử còn lại sau khi xóa project.
+    @Column(name = "project_id")
+    private Integer projectId;
+
     // PostgreSQL lưu mô tả dài bằng text; NVARCHAR(MAX) của cấu hình cũ không tạo được trên PostgreSQL.
     @Column(columnDefinition = "TEXT")
     private String description;

@@ -19,6 +19,7 @@ import java.util.*;
 @Service
 @RequiredArgsConstructor
 public class ContainerManagementService {
+    private final com.example.jira.service.AuditLogService audit;
     private final ProjectRepository projects;
     private final SprintRepository sprints;
     private final SprintIssueRepository links;
@@ -43,10 +44,15 @@ public class ContainerManagementService {
         LocalDateTime start = request.getStartDate() == null ? sprint.getStartDate() : request.getStartDate();
         LocalDateTime end = request.getEndDate() == null ? sprint.getEndDate() : request.getEndDate();
         if (start != null && end != null && !start.isBefore(end)) throw error(HttpStatus.BAD_REQUEST,"Ngày bắt đầu phải trước ngày kết thúc");
+        var before = Arrays.asList(sprint.getSprintName(),sprint.getGoal(),sprint.getStartDate(),sprint.getEndDate());
         // Mọi điều kiện đã đạt; giữ null là không thay đổi, goal rỗng được dùng để xóa nội dung goal.
         if (request.getSprintName() != null) sprint.setSprintName(request.getSprintName().trim());
         if (request.getGoal() != null) sprint.setGoal(request.getGoal());
         sprint.setStartDate(start); sprint.setEndDate(end); sprints.save(sprint);
+        if (!before.equals(Arrays.asList(sprint.getSprintName(),sprint.getGoal(),sprint.getStartDate(),sprint.getEndDate()))) {
+        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+        audit.logProjectAction("UPDATE_SPRINT",EntityType.SPRINT,sprintId,sprint.getProject().getProjectId(),"Cập nhật sprint");
+        }
         return SprintMapper.toResponse(sprint);
     }
 
@@ -66,13 +72,21 @@ public class ContainerManagementService {
         // Bulk delete không loại entity đã đọc khỏi persistence context. Detach link để MapsId không persist lại sprint đã xóa ở flush sau.
         current.forEach(entityManager::detach);
         sprints.delete(sprint); entityManager.flush();
+        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+        audit.logProjectAction("DELETE_SPRINT",EntityType.SPRINT,sprintId,sprint.getProject().getProjectId(),"Xóa sprint FUTURE");
     }
 
     /** boardId là boards; MANAGE_BOARD/khóa project trước ghi tên, không đổi project/type/mapping. */
     @Transactional
     public void updateBoard(int boardId,UpdateBoardRequest request) {
         if (request == null) throw error(HttpStatus.BAD_REQUEST,"Thiếu tên board"); name(request.getBoardName());
-        Board board = lockedBoard(boardId); board.setBoardName(request.getBoardName().trim()); boards.save(board);
+        Board board = lockedBoard(boardId);
+        boolean changed = !Objects.equals(board.getBoardName(),request.getBoardName().trim());
+        board.setBoardName(request.getBoardName().trim()); boards.save(board);
+        if (changed) {
+        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+        audit.logProjectAction("UPDATE_BOARD",EntityType.BOARD,boardId,board.getProject().getProjectId(),"Đổi tên board");
+        }
     }
 
     /** Xóa metadata/rank đúng board dưới khóa project; giữ issue, status, sprint và project, lỗi rollback toàn bộ. */
@@ -84,6 +98,8 @@ public class ContainerManagementService {
         remove("delete from BoardColumnStatus mapping where mapping.boardColumn.board.boardId = :id",boardId);
         remove("delete from BoardColumn column where column.board.boardId = :id",boardId);
         boards.delete(board); entityManager.flush();
+        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+        audit.logProjectAction("DELETE_BOARD",EntityType.BOARD,boardId,board.getProject().getProjectId(),"Xóa board và cấu hình cột");
     }
 
     /** Cột lấy project qua board; kiểm WIP mới bằng issues thật trước khi ghi tên/giới hạn, không đụng rank. */
@@ -96,9 +112,14 @@ public class ContainerManagementService {
         if (request.getWipLimit() != null && request.getWipLimit() > 0 && issues.countInBoardColumn(projectId,columnId,0) > request.getWipLimit()) {
             throw error(HttpStatus.CONFLICT,"WIP mới nhỏ hơn số issue hiện có");
         }
+        var before = Arrays.asList(column.getColumnName(),column.getWipLimit());
         if (request.getColumnName() != null) column.setColumnName(request.getColumnName().trim());
         if (request.getWipLimit() != null) column.setWipLimit(request.getWipLimit());
         columns.save(column);
+        if (!before.equals(Arrays.asList(column.getColumnName(),column.getWipLimit()))) {
+        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+        audit.logProjectAction("UPDATE_COLUMN",EntityType.BOARD,column.getBoard().getBoardId(),projectId,"Cập nhật cột ID "+columnId);
+        }
     }
 
     /** Cột có issue theo status thì 409; cột rỗng xóa rank cũ/mapping/cột trong một transaction, giữ status/issue. */
@@ -109,6 +130,8 @@ public class ContainerManagementService {
         remove("delete from BoardIssue rank where rank.column.columnId = :id",columnId);
         remove("delete from BoardColumnStatus mapping where mapping.boardColumn.columnId = :id",columnId);
         columns.delete(column); entityManager.flush();
+        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+        audit.logProjectAction("DELETE_COLUMN",EntityType.BOARD,column.getBoard().getBoardId(),column.getBoard().getProject().getProjectId(),"Xóa cột ID "+columnId);
     }
 
     /** Tra sprint để lấy project, kiểm quyền trước khóa; refresh sau khóa để không dùng state cũ lúc chờ. */

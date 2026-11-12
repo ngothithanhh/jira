@@ -18,6 +18,7 @@ import java.util.function.Function;
 @Service
 @RequiredArgsConstructor
 public class BacklogService {
+    private final com.example.jira.service.AuditLogService audit;
     private final ProjectRepository projects;
     private final SprintRepository sprints;
     private final IssueRepository issues;
@@ -57,8 +58,16 @@ public class BacklogService {
         // Mọi điều kiện đã đạt; cập nhật đúng các entity vừa đọc sau khóa, không ghi từng ID chưa kiểm scope.
         Map<Integer, Issue> byId = new HashMap<>();
         current.forEach(issue -> byId.put(issue.getIssueId(), issue));
-        for (int position = 0; position < ids.size(); position++) byId.get(ids.get(position)).setBacklogPosition(position);
+        boolean changed = false;
+        for (int position = 0; position < ids.size(); position++) {
+            Issue item = byId.get(ids.get(position)); changed |= !Objects.equals(item.getBacklogPosition(),position);
+            item.setBacklogPosition(position);
+        }
         issues.saveAll(current);
+        if (changed) {
+        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+        audit.logProjectAction("ORDER_PRODUCT_BACKLOG",EntityType.PROJECT,projectId,projectId,"Sắp xếp product backlog");
+        }
         return orderedIssues(current, Issue::getBacklogPosition);
     }
 
@@ -92,8 +101,16 @@ public class BacklogService {
         validateScope(ids, current.stream().map(link -> link.getIssue().getIssueId()).toList());
         Map<Integer, SprintIssue> byId = new HashMap<>();
         current.forEach(link -> byId.put(link.getIssue().getIssueId(), link));
-        for (int position = 0; position < ids.size(); position++) byId.get(ids.get(position)).setPosition(position);
+        boolean changed = false;
+        for (int position = 0; position < ids.size(); position++) {
+            SprintIssue item = byId.get(ids.get(position)); changed |= !Objects.equals(item.getPosition(),position);
+            item.setPosition(position);
+        }
         links.saveAll(current);
+        if (changed) {
+        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+        audit.logProjectAction("ORDER_SPRINT_BACKLOG",EntityType.SPRINT,sprintId,projectId,"Sắp xếp sprint backlog");
+        }
         return orderedSprint(current);
     }
 

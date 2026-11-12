@@ -1,5 +1,7 @@
 package com.example.jira.service.impl;
 
+import com.example.jira.enums.EntityType;
+
 import com.example.jira.dto.board.BoardResponse;
 import com.example.jira.dto.board.CreateBoardRequest;
 import com.example.jira.dto.board.CreateColumnRequest;
@@ -26,6 +28,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class BoardServiceImpl implements BoardService {
 
+    private final com.example.jira.service.AuditLogService audit;
     private final BoardRepository boardRepository;
     private final ProjectRepository projectRepository;
     private final BoardColumnRepository boardColumnRepository;
@@ -55,6 +58,8 @@ public class BoardServiceImpl implements BoardService {
         createDefaultColumn(board, "To Do", 1);
         createDefaultColumn(board, "In Progress", 2);
         createDefaultColumn(board, "Done", 3);
+        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+        audit.logProjectAction("CREATE_BOARD",EntityType.BOARD,board.getBoardId(),project.getProjectId(),"Tạo board và ba cột mặc định");
 
         // Quyền MANAGE_BOARD đã được kiểm trên project của board; tạo response trong cùng thao tác ghi.
         return getManagedBoardResponse(board.getBoardId());
@@ -120,6 +125,8 @@ public class BoardServiceImpl implements BoardService {
         column.setWipLimit(0);
 
         boardColumnRepository.save(column);
+        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+        audit.logProjectAction("CREATE_COLUMN",EntityType.BOARD,board.getBoardId(),board.getProject().getProjectId(),"Thêm cột ID "+column.getColumnId());
 
         // Quyền MANAGE_BOARD đã được kiểm trên project của board; tạo response trong cùng thao tác ghi.
         return getManagedBoardResponse(board.getBoardId());
@@ -143,12 +150,18 @@ public class BoardServiceImpl implements BoardService {
             throw new ConflictException("Trạng thái đã map vào cột khác của board");
         }
 
+        // Cặp đã tồn tại giữ hành vi lưu cũ, nhưng không tạo log gán mới giả.
+        boolean existed = boardColumnStatusRepository.existsById(new BoardColumnStatusId(columnId,statusId));
         BoardColumnStatus bcs = new BoardColumnStatus();
         bcs.setId(new BoardColumnStatusId(columnId, statusId));
         bcs.setBoardColumn(column);
         bcs.setIssueStatus(status);
 
         boardColumnStatusRepository.save(bcs);
+        if (!existed) {
+        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+        audit.logProjectAction("MAP_COLUMN_STATUS",EntityType.BOARD,column.getBoard().getBoardId(),column.getBoard().getProject().getProjectId(),"Cột ID "+columnId+", trạng thái ID "+statusId);
+        }
     }
 
     /** boardId là ID boards; từng columnId phải thuộc board này. Kiểm MANAGE_BOARD của project sở hữu trước cập nhật position; thiếu quyền thì 403. */
@@ -161,6 +174,7 @@ public class BoardServiceImpl implements BoardService {
             throw new AccessDeniedException("Không có quyền thực hiện");
         }
 
+        boolean changed = false;
         for (UpdateColumnOrderRequest request : requests) {
             BoardColumn column = boardColumnRepository.findById(request.getColumnId())
                     .orElseThrow(() -> new NotFoundException("Không tìm thấy cột với ID: " + request.getColumnId()));
@@ -170,8 +184,13 @@ public class BoardServiceImpl implements BoardService {
                 throw new ConflictException("Cột không thuộc bảng này");
             }
             
+            changed |= !java.util.Objects.equals(column.getPosition(),request.getPosition());
             column.setPosition(request.getPosition());
             boardColumnRepository.save(column);
+        }
+        if (changed) {
+        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+        audit.logProjectAction("ORDER_BOARD_COLUMNS",EntityType.BOARD,boardId,board.getProject().getProjectId(),"Sắp xếp cột board");
         }
     }
 
@@ -192,6 +211,8 @@ public class BoardServiceImpl implements BoardService {
                 .orElseThrow(() -> new ConflictException("Trạng thái này chưa được ánh xạ vào cột"));
 
         boardColumnStatusRepository.delete(bcs);
+        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+        audit.logProjectAction("UNMAP_COLUMN_STATUS",EntityType.BOARD,column.getBoard().getBoardId(),column.getBoard().getProject().getProjectId(),"Gỡ trạng thái ID "+statusId+" khỏi cột ID "+columnId);
     }
     /**
      * Chỉ createBoard/addColumn gọi sau khi đã kiểm MANAGE_BOARD trên project sở hữu board.

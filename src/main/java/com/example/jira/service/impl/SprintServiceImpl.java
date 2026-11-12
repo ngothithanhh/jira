@@ -1,5 +1,7 @@
 package com.example.jira.service.impl;
 
+import com.example.jira.enums.EntityType;
+
 import com.example.jira.dto.sprint.CreateSprintRequest;
 import com.example.jira.dto.sprint.SprintResponse;
 import com.example.jira.entity.*;
@@ -27,6 +29,7 @@ public class SprintServiceImpl implements SprintService {
 
     private static final List<SprintState> OPEN_STATES = List.of(SprintState.FUTURE, SprintState.ACTIVE);
 
+    private final com.example.jira.service.AuditLogService audit;
     private final SprintRepository sprintRepository;
     private final ProjectRepository projectRepository;
     private final IssueRepository issueRepository;
@@ -59,6 +62,9 @@ public class SprintServiceImpl implements SprintService {
         sprint.setCreatedAt(LocalDateTime.now());
         sprint.setState(SprintState.FUTURE);
         sprint = sprintRepository.save(sprint);
+
+        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+        audit.logProjectAction("CREATE_SPRINT",EntityType.SPRINT,sprint.getSprintId(),project.getProjectId(),"Tạo sprint FUTURE");
         return SprintMapper.toResponse(sprint);
     }
 
@@ -107,6 +113,8 @@ public class SprintServiceImpl implements SprintService {
             // Rời product backlog thì bỏ rank cũ; nếu quay lại sẽ xếp sau các vị trí người dùng đã chốt.
             issue.setBacklogPosition(null);
             saveSprintIssue(sprint, issue);
+        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+        audit.logProjectAction("ADD_SPRINT_ISSUE",EntityType.SPRINT,sprintId,sprint.getProject().getProjectId(),"Thêm issue ID "+issueId);
             // Liên kết ACTIVE thay đổi scope burndown; query snapshot flush cùng transaction hiện tại.
             metrics.captureActiveProject(sprint.getProject().getProjectId());
         }
@@ -128,9 +136,14 @@ public class SprintServiceImpl implements SprintService {
         requireSameProject(sprint, issue);
 
         // Chỉ reset rank khi thật sự gỡ một liên kết, tránh request lặp xóa thứ tự product backlog đã chốt.
-        if (sprintIssueRepository.existsById(new SprintIssueId(sprintId, issueId))) issue.setBacklogPosition(null);
+        boolean existed = sprintIssueRepository.existsById(new SprintIssueId(sprintId, issueId));
+        if (existed) issue.setBacklogPosition(null);
         // Filter cả hai ID giữ nguyên mọi liên kết khác của issue.
         sprintIssueRepository.deleteBySprint_SprintIdAndIssue_IssueId(sprintId, issueId);
+        if (existed) {
+        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+        audit.logProjectAction("REMOVE_SPRINT_ISSUE",EntityType.SPRINT,sprintId,sprint.getProject().getProjectId(),"Gỡ issue ID "+issueId);
+        }
         // Ghi sự thay đổi scope sau khi gỡ, không snapshot FUTURE hoặc sửa commitment lúc bắt đầu.
         metrics.captureActiveProject(sprint.getProject().getProjectId());
     }
@@ -158,6 +171,8 @@ public class SprintServiceImpl implements SprintService {
         sprintRepository.save(sprint);
         // Chụp commitment đúng lúc bắt đầu; lỗi lưu snapshot rollback cả chuyển ACTIVE.
         metrics.start(sprint);
+        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+        audit.logProjectAction("START_SPRINT",EntityType.SPRINT,sprintId,sprint.getProject().getProjectId(),"Bắt đầu sprint: FUTURE → ACTIVE");
     }
 
     /**
@@ -221,6 +236,8 @@ public class SprintServiceImpl implements SprintService {
         sprintRepository.save(sprint);
         // Event cuối phản ánh scope còn lại; đích ACTIVE nhận việc cũng được capture trong cùng transaction.
         metrics.captureClosed(sprint);
+        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+        audit.logProjectAction("COMPLETE_SPRINT",EntityType.SPRINT,sprintId,sprint.getProject().getProjectId(),"Hoàn tất sprint; chuyển việc chưa xong đến sprint ID "+moveToSprintId);
         metrics.captureActiveProject(sprint.getProject().getProjectId());
     }
 

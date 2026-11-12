@@ -135,9 +135,13 @@ public class ProjectServiceImpl implements ProjectService {
         // Chỉ sửa tên/mô tả sau quyền và tồn tại; key/lead cùng dữ liệu issue/sprint giữ nguyên.
         validateName(request == null ? null : request.getProjectName());
         validateDescription(request.getDescription());
+        boolean changed = !java.util.Objects.equals(project.getProjectName(),request.getProjectName().trim())
+                || !java.util.Objects.equals(project.getDescription(),request.getDescription());
         project.setProjectName(request.getProjectName().trim());
         project.setDescription(request.getDescription());
         projectRepository.save(project);
+        // Giữ projectId trong lịch sử; cập nhật giống dữ liệu cũ không tạo audit thay đổi giả.
+        if (changed) auditLogService.logAction("UPDATE_PROJECT",EntityType.PROJECT,id,"Cập nhật dự án");
         ProjectSummary result = projectMapper.toResponse(project);
         attachCounts(List.of(result));
         return result;

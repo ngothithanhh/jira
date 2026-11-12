@@ -67,7 +67,7 @@ public class IssueCommentServiceImpl implements IssueCommentService {
         comment.setUpdatedAt(comment.getCreatedAt());
 
         IssueComment savedComment = issueCommentRepository.save(comment);
-        audit.logAction("CREATE_COMMENT",EntityType.COMMENT,savedComment.getCommentId(),"Thêm bình luận cho issue ID " + issueId);
+        audit.logProjectAction("CREATE_COMMENT",EntityType.COMMENT,savedComment.getCommentId(),issue.getProject().getProjectId(),"Thêm bình luận cho issue ID " + issueId);
 
         // Notify reporter and assignee
         String actorName = user.getFullName() != null ? user.getFullName() : "Ai đó";
@@ -108,7 +108,7 @@ public class IssueCommentServiceImpl implements IssueCommentService {
         text(request.commentText());
         IssueComment comment = writable(issueId,commentId,request.expectedVersion());
         comment.setCommentText(request.commentText()); comment.setUpdatedAt(LocalDateTime.now()); issueCommentRepository.save(comment);
-        audit.logAction("UPDATE_COMMENT",EntityType.COMMENT,commentId,"Sửa bình luận của issue ID " + issueId);
+        audit.logProjectAction("UPDATE_COMMENT",EntityType.COMMENT,commentId,comment.getIssue().getProject().getProjectId(),"Sửa bình luận của issue ID " + issueId);
         entityManager.flush(); return IssueCommentMapper.toResponse(comment);
     }
 
@@ -117,7 +117,7 @@ public class IssueCommentServiceImpl implements IssueCommentService {
     public void deleteComment(int issueId,int commentId,Long expectedVersion) {
         IssueComment comment = writable(issueId,commentId,expectedVersion);
         issueCommentRepository.delete(comment); entityManager.flush();
-        audit.logAction("DELETE_COMMENT",EntityType.COMMENT,commentId,"Xóa bình luận của issue ID " + issueId);
+        audit.logProjectAction("DELETE_COMMENT",EntityType.COMMENT,commentId,comment.getIssue().getProject().getProjectId(),"Xóa bình luận của issue ID " + issueId);
     }
 
     /** Issue quyết định project; chỉ tác giả còn VIEW_PROJECT hoặc người có EDIT_ISSUE được sửa, cùng khóa project rồi refresh/so version. */

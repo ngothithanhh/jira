@@ -9,6 +9,8 @@ public class AuditSearchRequest {
     private EntityType entityType;
     @Positive private Integer entityId;
     @Positive private Integer actorId;
+    @Positive private Integer projectId;
+    private Boolean systemOnly;
     @Size(max=50) private String action;
     @DateTimeFormat(iso=DateTimeFormat.ISO.DATE_TIME) private LocalDateTime createdFrom;
     @DateTimeFormat(iso=DateTimeFormat.ISO.DATE_TIME) private LocalDateTime createdTo;

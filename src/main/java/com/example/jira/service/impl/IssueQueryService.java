@@ -81,7 +81,7 @@ public class IssueQueryService {
             entityManager.createQuery("delete from " + entity + " child where child.issue.issueId = :id").setParameter("id",issueId).executeUpdate();
         }
         String key = issue.getIssueKey(); issues.delete(issue); entityManager.flush();
-        audit.logAction("DELETE",EntityType.ISSUE,issueId,"Xóa issue: " + key);
+        audit.logProjectAction("DELETE",EntityType.ISSUE,issueId,projectId,"Xóa issue: " + key);
         // Gỡ issue khỏi ACTIVE thay đổi scope; ghi event cùng transaction delete/audit, không sửa snapshot CLOSED.
         metrics.captureActiveProject(projectId);
     }

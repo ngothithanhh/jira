@@ -1,5 +1,7 @@
 package com.example.jira.service.impl;
 
+import com.example.jira.enums.EntityType;
+
 import com.example.jira.dto.board.*;
 import com.example.jira.entity.*;
 import com.example.jira.enums.PermissionName;
@@ -20,6 +22,7 @@ import java.util.*;
 @Service
 @RequiredArgsConstructor
 public class BoardCardService {
+    private final com.example.jira.service.AuditLogService audit;
     private final BoardRepository boards;
     private final BoardColumnRepository columns;
     private final BoardColumnStatusRepository mappings;
@@ -91,6 +94,8 @@ public class BoardCardService {
                         .thenComparingInt(Issue::getIssueNumber).thenComparingInt(Issue::getIssueId)).toList());
         if (request.getPosition() > destination.size()) throw error(HttpStatus.BAD_REQUEST,"Vị trí vượt kích thước cột đích");
 
+        // Chụp vị trí trước khi sửa rank; thao tác cùng vị trí/trạng thái không tạo audit thay đổi giả.
+        boolean auditChanged = issue.getStatus()==null || issue.getStatus().getStatusId()!=request.getStatusId();
         // Status thay đổi dùng lại workflow/transaction cũ; giữ status thì vẫn xét WIP trước reorder.
         if (issue.getStatus() == null || issue.getStatus().getStatusId() != request.getStatusId()) {
             issueService.changeIssueStatus(issueId,request.getStatusId());
@@ -100,9 +105,13 @@ public class BoardCardService {
         for (int position = 0; position < destination.size(); position++) {
             Issue card = destination.get(position); BoardIssue rank = saved.get(card.getIssueId());
             if (rank == null) { rank = new BoardIssue(); rank.setId(new BoardIssueId(boardId,card.getIssueId())); rank.setBoard(board); rank.setIssue(card); }
+            auditChanged |= rank.getColumn()==null || rank.getColumn().getColumnId()!=target.getColumnId() || !Objects.equals(rank.getPosition(),position);
             rank.setColumn(target); rank.setPosition(position); changed.add(rank);
         }
+        // Ghi log khi vị trí/trạng thái thực sự đổi; vòng ghi rank vẫn giữ nguyên hành vi cũ.
         ranks.saveAll(changed);
+        // Lưu phạm vi project cùng thay đổi nghiệp vụ; lỗi audit làm rollback, không tự retry.
+        if (auditChanged) audit.logProjectAction("MOVE_BOARD_ISSUE",EntityType.ISSUE,issueId,projectId,"Board ID "+boardId+", cột ID "+target.getColumnId()+", vị trí "+request.getPosition());
         // Đảm bảo timestamp đổi ít nhất 1 microsecond để move chỉ đổi rank cũng làm Hibernate tăng version.
         LocalDateTime now = LocalDateTime.now();
         issue.setUpdatedAt(issue.getUpdatedAt() != null && !now.isAfter(issue.getUpdatedAt().plusNanos(1000)) ? issue.getUpdatedAt().plusNanos(1000) : now);
