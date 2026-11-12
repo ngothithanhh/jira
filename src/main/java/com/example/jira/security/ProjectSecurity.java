@@ -37,7 +37,16 @@ public class ProjectSecurity {
         int userId = SecurityUtils.getCurrentUserId();
 
         // Chỉ SYSTEM_ADMIN trong user_role_assignments được vượt phạm vi dự án.
-        if (globalSecurity.isSystemAdmin()) {
+        return hasPermission(projectId, permission, userId, globalSecurity.isSystemAdmin());
+    }
+
+    /** Kiểm quyền của inviter lấy từ lời mời, không thay Authentication của recipient. */
+    public boolean hasPermissionForUser(int projectId, PermissionName permission, int userId) {
+        return hasPermission(projectId, permission, userId, globalSecurity.isSystemAdmin(userId));
+    }
+
+    private boolean hasPermission(int projectId, PermissionName permission, int userId, boolean systemAdmin) {
+        if (systemAdmin) {
             return true;
         }
 

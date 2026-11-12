@@ -10,6 +10,7 @@ public class NotificationResponse {
     private int notificationId;
     private int userId;
     private Integer issueId;
+    private java.util.UUID invitationId;
     private NotificationType notificationType;
     private Integer actorId;
     private String actorName;

@@ -3,7 +3,6 @@ package com.example.jira.controller.auth;
 import com.example.jira.dto.auth.AuthResponseDTO;
 import com.example.jira.dto.auth.LoginRequestDTO;
 import com.example.jira.dto.auth.RefreshRequestDTO;
-import com.example.jira.dto.auth.RegisterRequestDTO;
 import com.example.jira.dto.user.UserSummary;
 import com.example.jira.service.AuthService;
 import lombok.RequiredArgsConstructor;
@@ -23,11 +22,6 @@ public class AuthController {
     @PostMapping("/login")
     public AuthResponseDTO login(@RequestBody LoginRequestDTO request){
         return authService.login(request);
-    }
-
-    @PostMapping("/register")
-    public AuthResponseDTO register(@RequestBody RegisterRequestDTO request){
-        return authService.register(request);
     }
 
     @PostMapping("/refresh")

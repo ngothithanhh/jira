@@ -42,6 +42,9 @@ class SystemSmokeIT {
     @LocalServerPort int port;
     @Autowired ObjectMapper json;
     @Autowired UserRepository users;
+    @Autowired ProjectRepository projects;
+    @Autowired ProjectMemberRepository members;
+    @Autowired com.example.jira.service.NotificationService notifications;
     @Autowired UserRoleRepository roles;
     @Autowired UserRoleAssignmentRepository assignments;
     @Autowired IssueTypeRepository types;
@@ -103,8 +106,8 @@ class SystemSmokeIT {
                 "createdFrom=2026-03-01T00:00:00&createdTo=2026-02-01T00:00:00"))
             call("GET",auditPath+"?"+invalid,token,null,400);
         assertThat(call("GET","/api/admin/overview",token,null,200).path("issues").asInt()).isEqualTo(1);
-        JsonNode regular=call("POST","/api/auth/register",null,Map.of("email","smoke-user@test.invalid","password","smoke-password","userName","smoke-user","fullName","User"),200);
-        String regularToken=regular.path("token").asText();
+        seedVerifiedUser("smoke-user", "smoke-password");
+        String regularToken=login("smoke-user@test.invalid", "smoke-password");
         call("GET","/api/admin/users",regularToken,null,403);call("GET","/api/user",regularToken,null,403);
         call("GET","/api/admin/users/"+admin.getUserId(),regularToken,null,403);
         JsonNode directory=call("GET","/api/admin/users?keyword=smoke&size=1",token,null,200);assertThat(directory.path("totalItems").asInt()).isEqualTo(2);assertThat(directory.path("items").size()).isEqualTo(1);
@@ -112,7 +115,8 @@ class SystemSmokeIT {
         call("GET","/api/admin/overview",regularToken,null,403); call("GET","/api/issues/"+issueId,regularToken,null,403);
         int regularId=users.findByEmail("smoke-user@test.invalid").orElseThrow().getUserId();
         int developerId=roles.findByRoleName("DEVELOPER").orElseThrow().getRoleId();
-        call("POST","/api/projects/"+projectId+"/members",token,Map.of("userId",regularId,"roleId",developerId),200);
+        seedMembership(projectId, regularId, developerId);
+        notifications.sendNotification(regularId, null, admin.getUserId(), com.example.jira.enums.NotificationType.PROJECT_INVITED, "Smoke notification");
         assertThat(call("GET","/api/notifications/unread-count",regularToken,null,200).path("count").asInt()).isEqualTo(1);
         assertThat(call("PUT","/api/notifications/read-all",regularToken,null,200).path("updated").asInt()).isEqualTo(1);
         call("GET","/api/issues/"+issueId,regularToken,null,200);
@@ -147,8 +151,7 @@ class SystemSmokeIT {
     /** HTTP thật chứng minh user không global role tự tạo project và chỉ quản lý project mình sở hữu. */
     @Test void ordinaryUserOwnsProjectAndAdminRoleCrudIsScoped() throws Exception {
         String password="p1-regression-password";
-        for(String name:List.of("p1-owner","p1-other"))
-            call("POST","/api/auth/register",null,Map.of("email",name+"@test.invalid","userName",name,"fullName",name,"password",password),200);
+        for(String name:List.of("p1-owner","p1-other")) seedVerifiedUser(name, password);
         String owner=login("p1-owner@test.invalid",password),other=login("p1-other@test.invalid",password);
         int ownerId=users.findByEmail("p1-owner@test.invalid").orElseThrow().getUserId();
         int otherId=users.findByEmail("p1-other@test.invalid").orElseThrow().getUserId();
@@ -166,7 +169,7 @@ class SystemSmokeIT {
         call("GET","/api/projects/"+id,other,null,403);
         call("PATCH","/api/projects/"+id,other,Map.of("projectName","Stolen"),403);
         call("DELETE","/api/projects/"+id,other,null,403);
-        call("POST","/api/projects/"+id+"/members",owner,Map.of("userId",otherId,"roleId",dev),200);
+        seedMembership(id, otherId, dev);
         call("GET","/api/projects/"+id,other,null,200);
         call("DELETE","/api/projects/"+id,owner,null,409);
         call("DELETE","/api/projects/"+id+"/members/"+otherId,owner,null,200);
@@ -227,6 +230,27 @@ class SystemSmokeIT {
             assertThat(spec.path("paths").has(path)).as("OpenAPI path %s",path).isTrue();
         }
     }
+    // Fixture riêng cho luồng board/account. Luồng tạo membership qua accept được kiểm trong suite email.
+    private void seedMembership(int projectId, int userId, int roleId) {
+        var member = new ProjectMember();
+        member.setId(new ProjectMemberId(projectId, userId));
+        member.setProject(projects.findById(projectId).orElseThrow());
+        member.setUser(users.findById(userId).orElseThrow());
+        member.setRole(roles.findById(roleId).orElseThrow());
+        member.setAssignedAt(java.time.LocalDateTime.now());
+        members.saveAndFlush(member);
+    }
+
+    private void seedVerifiedUser(String name, String password) {
+        var user = Fixtures.user(0);
+        user.setEmail(name + "@test.invalid");
+        user.setUserName(name);
+        user.setFullName(name);
+        user.setEmailVerifiedAt(java.time.Instant.now());
+        user.setPasswordHash(encoder.encode(password));
+        users.saveAndFlush(user);
+    }
+
     private String login(String email,String password) throws Exception {
         String token=call("POST","/api/auth/login",null,Map.of("email",email,"password",password),200).path("token").asText();
         assertThat(token.isBlank()).isFalse(); return token;

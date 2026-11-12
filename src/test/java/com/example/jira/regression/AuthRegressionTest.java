@@ -12,8 +12,6 @@ import org.mockito.*;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.authentication.*;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import java.time.LocalDateTime;
 import java.util.*;
 import static org.assertj.core.api.Assertions.*;
@@ -30,34 +28,13 @@ class AuthRegressionTest {
         @Mock AuthenticationManager manager;
         @Mock JwtUtil jwt;
         @Mock RefreshTokenService tokens;
-        @Spy PasswordEncoder encoder = new BCryptPasswordEncoder(4);
         @InjectMocks AuthServiceImpl service;
 
-        // Đăng ký lưu hash thay mật khẩu rõ; chỉ cấp token sau khi lưu user.
-        @Test void registerPersistsEncodedPasswordBeforeIssuingTokens() {
-            var req = new RegisterRequestDTO(); req.setEmail("new@test.invalid"); req.setPassword("sample-password");
-            req.setUserName("new"); req.setFullName("New User");
-            var refresh = new RefreshToken(); refresh.setTokenValue("refresh");
-            when(tokens.createRefreshToken(any())).thenReturn(refresh);
-            when(jwt.generateToken(req.getEmail())).thenReturn("access");
-            service.register(req);
-            var captured = ArgumentCaptor.forClass(User.class); verify(users).save(captured.capture());
-            assertThat(encoder.matches("sample-password", captured.getValue().getPasswordHash())).isTrue();
-            assertThat(captured.getValue().getCreatedAt()).isNotNull();
-            var order = inOrder(users, tokens); order.verify(users).save(any()); order.verify(tokens).createRefreshToken(any());
-        }
-        // Email trùng phải dừng trước lưu tài khoản và trước cấp refresh token.
-        @Test void duplicateEmailDoesNotWrite() {
-            var req = new RegisterRequestDTO(); req.setEmail("existing@test.invalid");
-            when(users.existsByEmail(req.getEmail())).thenReturn(true);
-            assertThatThrownBy(() -> service.register(req)).isInstanceOf(com.example.jira.exception.ConflictException.class);
-            verify(users, never()).save(any()); verifyNoInteractions(tokens, jwt);
-        }
         // Sai mật khẩu dừng ở AuthenticationManager, không cấp phiên làm việc.
         @Test void wrongPasswordDoesNotIssueTokens() {
             var req = new LoginRequestDTO(); req.setEmail("a@test.invalid"); req.setPassword("wrong");
             var user = Fixtures.user(1);
-            when(users.findByEmail(req.getEmail())).thenReturn(Optional.of(user)); when(users.findByIdForUpdate(1)).thenReturn(Optional.of(user));
+            when(users.findByCanonicalEmail(req.getEmail())).thenReturn(Optional.of(user)); when(users.findByIdForUpdate(1)).thenReturn(Optional.of(user));
             when(manager.authenticate(any())).thenThrow(new BadCredentialsException("wrong password"));
             assertThatThrownBy(() -> service.login(req)).isInstanceOf(BadCredentialsException.class);
             verifyNoInteractions(tokens, jwt);
@@ -66,12 +43,13 @@ class AuthRegressionTest {
         @Test void loginIssuesTokensForAuthenticatedUser() {
             var req = new LoginRequestDTO(); req.setEmail("user1@test.invalid"); req.setPassword("password");
             var u = Fixtures.user(1); var token = new RefreshToken(); token.setTokenValue("refresh");
-            when(users.findByEmail(req.getEmail())).thenReturn(Optional.of(u));
+            u.setEmail("User1@test.invalid");
+            when(users.findByCanonicalEmail(req.getEmail())).thenReturn(Optional.of(u));
             when(users.findByIdForUpdate(1)).thenReturn(Optional.of(u));
             when(tokens.createRefreshToken(u)).thenReturn(token);
-            when(jwt.generateToken(req.getEmail(),0)).thenReturn("access");
+            when(jwt.generateToken(u.getEmail(),0)).thenReturn("access");
             assertThat(service.login(req)).isNotNull();
-            verify(manager).authenticate(any()); verify(tokens).createRefreshToken(u);
+            verify(manager).authenticate(argThat(auth -> u.getEmail().equals(auth.getName()))); verify(tokens).createRefreshToken(u);
         }
         // Refresh nhận kết quả đã commit từ luồng tiêu thụ token có khóa, sau đó mới cấp access token.
         @Test void refreshVerifiesThenRotates() {

@@ -800,7 +800,7 @@ class PostgresRegressionIT {
      * Không mock ProjectSecurity trong case này; dùng PostgreSQL thật và cùng persistence context cho precheck/service.
      */
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(strings={"add","role","remove"})
+    @org.junit.jupiter.params.provider.ValueSource(strings={"role","remove"})
     void memberWriteRejectsRevokedRoleAlreadyLoadedInPersistenceContext(String operation) {
         var oldRole=roleRows.saveAndFlush(Fixtures.role(0,"PROJECT_MANAGER"));
         var newRole=roleRows.saveAndFlush(Fixtures.role(0,"DEVELOPER"));
@@ -812,7 +812,7 @@ class PostgresRegressionIT {
         ProjectMember actor=new ProjectMember();actor.setId(new ProjectMemberId(project.getProjectId(),caller.getUserId()));actor.setProject(project);actor.setUser(caller);actor.setRole(oldRole);members.saveAndFlush(actor);
         var target=Fixtures.user(0);target.setEmail("member-revoked-target@test.invalid");target=users.saveAndFlush(target);
         int targetId=target.getUserId(), projectId=project.getProjectId(), actorId=caller.getUserId();
-        if(!operation.equals("add")) {
+        {
             var member=new ProjectMember();member.setId(new ProjectMemberId(projectId,targetId));member.setProject(project);member.setUser(target);member.setRole(newRole);members.saveAndFlush(member);
         }
         var realSecurity=new ProjectSecurity(members,permissionLinks,projects,new com.example.jira.security.GlobalSecurity(roleAssignments));
@@ -825,8 +825,7 @@ class PostgresRegressionIT {
                 otherTransaction.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
                 otherTransaction.execute(status->{jdbc.update("update project_members set role_id=? where project_id=? and user_id=?",newRole.getRoleId(),projectId,actorId);return null;});
                 assertThatThrownBy(()->{
-                    if(operation.equals("add")){var body=new com.example.jira.dto.project.AddMemberRequest();body.setUserId(targetId);body.setRoleId(newRole.getRoleId());memberService.addMember(projectId,body);}
-                    else if(operation.equals("role"))memberService.updateRole(projectId,targetId,newRole.getRoleId());
+                    if(operation.equals("role"))memberService.updateRole(projectId,targetId,newRole.getRoleId());
                     else memberService.removeMember(projectId,targetId);
                 }).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
                 // Service bị từ chối đánh dấu transaction chung rollback-only; test chủ động rollback thay vì commit nó.
@@ -837,15 +836,6 @@ class PostgresRegressionIT {
         } finally {ReflectionTestUtils.setField(serviceTarget,"projectSecurity",security);}
     }
 
-    // Member/audit chưa được commit nếu notification giữa bước bị lỗi.
-    @Test void failedInvitationRollsBackMemberAndAudit() {
-        var target=Fixtures.user(0); target.setEmail("invited@test.invalid"); target=users.saveAndFlush(target); var role=roleRows.saveAndFlush(Fixtures.role(0,"DEVELOPER"));
-        when(security.hasPermission(project.getProjectId(),PermissionName.ADD_MEMBER)).thenReturn(true);
-        doThrow(new IllegalStateException("invite failed")).when(notifications).sendNotification(anyInt(),any(),any(),any(),anyString());
-        var request=new com.example.jira.dto.project.AddMemberRequest(); request.setUserId(target.getUserId()); request.setRoleId(role.getRoleId());
-        assertThatThrownBy(() -> memberService.addMember(project.getProjectId(),request)).hasMessageContaining("invite failed");
-        assertThat(members.count()).isZero(); assertThat(jdbc.queryForObject("select count(*) from audit_logs where action='ADD_MEMBER'",Integer.class)).isZero();
-    }
     // Disable chặn login/refresh; mở lại vẫn cần đăng nhập mới, token cũ không sống lại.
     @Test void disabledAccountCannotLoginOrRefreshAndReservedRoleCannotBeChanged() {
         UserRole admin=makeAdmin(caller); var target=Fixtures.user(0); target.setEmail("disabled@test.invalid"); target.setPasswordHash(encoder.encode("old-password")); target=users.saveAndFlush(target);

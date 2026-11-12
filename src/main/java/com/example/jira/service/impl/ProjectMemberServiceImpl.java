@@ -1,6 +1,5 @@
 package com.example.jira.service.impl;
 
-import com.example.jira.dto.project.AddMemberRequest;
 import com.example.jira.dto.project.MemberCandidate;
 import com.example.jira.dto.project.ProjectMemberResponse;
 import com.example.jira.entity.*;
@@ -8,12 +7,10 @@ import com.example.jira.mapper.ProjectMemberMapper;
 import com.example.jira.repository.*;
 import com.example.jira.security.ProjectSecurity;
 import com.example.jira.service.ProjectMemberService;
+import com.example.jira.ultils.SecurityUtils;
 import com.example.jira.enums.EntityType;
-import com.example.jira.enums.NotificationType;
 import com.example.jira.enums.PermissionName;
 import com.example.jira.service.AuditLogService;
-import com.example.jira.service.NotificationService;
-import com.example.jira.ultils.SecurityUtils;
 import com.example.jira.exception.NotFoundException;
 import com.example.jira.exception.ConflictException;
 import org.springframework.security.access.AccessDeniedException;
@@ -21,7 +18,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -33,52 +29,8 @@ public class ProjectMemberServiceImpl implements ProjectMemberService {
     private final UserRoleRepository userRoleRepositoty;
     private final ProjectSecurity projectSecurity;
     private final AuditLogService auditLogService;
-    private final NotificationService notificationService;
     private final jakarta.persistence.EntityManager entityManager;
 
-    /** projectId là ID projects, request.userId là người được thêm và roleId là ID user_roles. Kiểm ADD_MEMBER trước khi đọc/ghi; lưu project_members rồi audit và thông báo người được thêm. */
-    @Override
-    @Transactional
-    public void addMember(int projectId, AddMemberRequest request){
-        // Kiểm quyền sau khi khóa để đọc membership của actor từ transaction đã commit gần nhất.
-        Project project = lockProject(projectId);
-        if(!projectSecurity.hasPermission(projectId, PermissionName.ADD_MEMBER))
-            throw new AccessDeniedException("Bạn không có quyền thêm thành viên vào dự án này!");
-
-        User user = userRepository.findById(request.getUserId()).orElseThrow(()->new NotFoundException("Không tìm thấy người dùng!"));
-        if (!user.isEnabled()) throw new ConflictException("Tài khoản này đã bị vô hiệu hóa");
-
-        UserRole userRole = userRoleRepositoty.findByRoleId(request.getRoleId()).orElseThrow(()->new NotFoundException("Không tìm thấy vai trò!"));
-        requireProjectRole(userRole);
-        if(userRole.getRoleName().equalsIgnoreCase("PROJECT_MANAGER")){
-            if(projectMemberRepository.countOtherProjectManagers(projectId,request.getUserId())>0){
-                throw new ConflictException("Đã có PROJECT MANAGER!");
-            }
-        }
-
-        ProjectMemberId id = new ProjectMemberId(projectId,user.getUserId());
-
-        if(projectMemberRepository.existsById(id)){
-            throw new ConflictException("Người dùng đã có trong dự án!");
-        }
-
-        ProjectMember member = new ProjectMember();
-        member.setId(id);
-        member.setProject(project);
-        member.setRole(userRole);
-        member.setUser(user);
-        member.setAssignedAt(LocalDateTime.now());
-
-        projectMemberRepository.save(member);
-        
-        auditLogService.logAction("ADD_MEMBER", EntityType.PROJECT, projectId, "Thêm người dùng ID " + request.getUserId() + " với vai trò ID " + request.getRoleId());
-        
-        int actorId = SecurityUtils.getCurrentUserId();
-        User actor = userRepository.findById(actorId).orElse(null);
-        String actorName = actor != null ? actor.getFullName() : "Hệ thống";
-        String message = actorName + " đã thêm bạn vào dự án " + project.getProjectName() + ".";
-        notificationService.sendNotification(request.getUserId(), null, actorId, NotificationType.PROJECT_INVITED, message);
-    }
     /** projectId là ID projects trong path. Thiếu VIEW_PROJECT thì 403 trước truy vấn project_members; đủ quyền mới trả danh sách, không ghi DB. */
     @Override
     @Transactional(readOnly = true)

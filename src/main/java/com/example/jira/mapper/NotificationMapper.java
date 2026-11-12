@@ -11,6 +11,7 @@ public class NotificationMapper {
         NotificationResponse res = new NotificationResponse();
         res.setNotificationId(notification.getNotificationId());
         res.setUserId(notification.getUser().getUserId());
+        res.setInvitationId(notification.getInvitationId());
         if (notification.getIssue() != null) {
             res.setIssueId(notification.getIssue().getIssueId());
         }
