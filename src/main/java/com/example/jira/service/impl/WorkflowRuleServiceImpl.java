@@ -13,9 +13,11 @@ import com.example.jira.service.WorkflowRuleService;
 import com.example.jira.security.GlobalSecurity;
 import com.example.jira.exception.NotFoundException;
 import com.example.jira.exception.ConflictException;
-import org.springframework.security.access.AccessDeniedException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
@@ -28,6 +30,7 @@ public class WorkflowRuleServiceImpl implements WorkflowRuleService {
     private final IssueStatusRepository issueStatusRepository;
 
     @Override
+    @Transactional(readOnly = true)
     public List<WorkflowRuleResponse> getAllRules() {
         return workflowRuleRepository.findAll()
                 .stream()
@@ -40,24 +43,34 @@ public class WorkflowRuleServiceImpl implements WorkflowRuleService {
      * Người gọi phải có SYSTEM_ADMIN trong user_role_assignments; thiếu quyền thì 403 trước mọi đọc/ghi nghiệp vụ.
      */
     @Override
+    @Transactional
     public WorkflowRuleResponse createRule(WorkflowRuleRequest request) {
         // Chặn user thường trước khi tra ID mục tiêu; biết ID role/quyền không cho phép tự nâng quyền.
         globalSecurity.assertSystemAdmin();
-        if (workflowRuleRepository.existsByFromStatus_StatusIdAndToStatus_StatusId(request.getFromStatusId(), request.getToStatusId())) {
+        int fromId = request.getFromStatusId();
+        int toId = request.getToStatusId();
+        if (fromId == toId) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Trạng thái nguồn và đích phải khác nhau.");
+        }
+
+        // Cùng cặp nguồn/đích khóa hai hàng theo thứ tự ID trước khi kiểm trùng.
+        int firstId = Math.min(fromId, toId);
+        IssueStatus first = lockStatus(firstId, firstId == fromId);
+        IssueStatus second = lockStatus(Math.max(fromId, toId), firstId != fromId);
+        if (workflowRuleRepository.existsByFromStatus_StatusIdAndToStatus_StatusId(fromId, toId)) {
             throw new ConflictException("Quy tắc chuyển trạng thái này đã tồn tại!");
         }
 
-        IssueStatus fromStatus = issueStatusRepository.findById(request.getFromStatusId())
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy trạng thái bắt đầu!"));
-
-        IssueStatus toStatus = issueStatusRepository.findById(request.getToStatusId())
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy trạng thái đích!"));
-
         WorkflowRule rule = new WorkflowRule();
-        rule.setFromStatus(fromStatus);
-        rule.setToStatus(toStatus);
+        rule.setFromStatus(firstId == fromId ? first : second);
+        rule.setToStatus(firstId == fromId ? second : first);
 
         return WorkflowRuleMapper.toResponse(workflowRuleRepository.save(rule));
+    }
+
+    private IssueStatus lockStatus(int id, boolean source) {
+        return issueStatusRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new NotFoundException(source ? "Không tìm thấy trạng thái bắt đầu!" : "Không tìm thấy trạng thái đích!"));
     }
 
     /**
@@ -65,6 +78,7 @@ public class WorkflowRuleServiceImpl implements WorkflowRuleService {
      * Người gọi phải có SYSTEM_ADMIN trong user_role_assignments; thiếu quyền thì 403 trước mọi đọc/ghi nghiệp vụ.
      */
     @Override
+    @Transactional
     public void deleteRule(int ruleId) {
         // Chặn user thường trước khi tra ID mục tiêu; biết ID role/quyền không cho phép tự nâng quyền.
         globalSecurity.assertSystemAdmin();
@@ -74,6 +88,7 @@ public class WorkflowRuleServiceImpl implements WorkflowRuleService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<IssueStatusResponse> getAllowedNextStatuses(int currentStatusId) {
         return workflowRuleRepository.findByFromStatus_StatusId(currentStatusId)
                 .stream()

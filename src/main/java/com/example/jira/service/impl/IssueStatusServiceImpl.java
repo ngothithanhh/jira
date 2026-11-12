@@ -44,11 +44,12 @@ public class IssueStatusServiceImpl implements IssueStatusService {
         // Chặn user thường trước khi tra ID mục tiêu; biết ID role/quyền không cho phép tự nâng quyền.
         globalSecurity.assertSystemAdmin();
 
-        if(issueStatusRepository.existsByStatusName(request.getStatusName()))
+        String name = request.getStatusName().trim();
+        if(issueStatusRepository.existsByStatusName(name))
             throw new ConflictException("Tên trạng thái đã có!");
 
         IssueStatus status = new IssueStatus();
-        status.setStatusName(request.getStatusName());
+        status.setStatusName(name);
         status.setStatusCategory(request.getStatusCategory());
 
         return IssueStatusMapper.toResponse(issueStatusRepository.save(status));
@@ -63,8 +64,11 @@ public class IssueStatusServiceImpl implements IssueStatusService {
     public IssueStatusResponse updateStatus(int id, IssueStatusRequest request){
         // Chặn user thường trước khi tra ID mục tiêu; biết ID role/quyền không cho phép tự nâng quyền.
         globalSecurity.assertSystemAdmin();
-        IssueStatus status = issueStatusRepository.findById(id).orElseThrow(() -> new NotFoundException("Không tìm thấy trạng thái"));
-        status.setStatusName(request.getStatusName());
+        IssueStatus status = issueStatusRepository.findByIdForUpdate(id).orElseThrow(() -> new NotFoundException("Không tìm thấy trạng thái"));
+        if (status.getStatusCategory() != request.getStatusCategory() && issueRepository.existsByStatus_StatusId(id)) {
+            throw new ConflictException("Không thể đổi nhóm khi còn công việc sử dụng trạng thái này.");
+        }
+        status.setStatusName(request.getStatusName().trim());
         status.setStatusCategory(request.getStatusCategory());
 
         return IssueStatusMapper.toResponse(issueStatusRepository.save(status));
@@ -79,14 +83,13 @@ public class IssueStatusServiceImpl implements IssueStatusService {
     public void deleteStatus(int id){
         // Chặn user thường trước khi tra ID mục tiêu; biết ID role/quyền không cho phép tự nâng quyền.
         globalSecurity.assertSystemAdmin();
+        issueStatusRepository.findByIdForUpdate(id).orElseThrow(() -> new NotFoundException("Không tìm thấy trạng thái"));
         boolean inUsedInIssues = issueRepository.existsByStatus_StatusId(id);
 
         if(inUsedInIssues)
             throw new ConflictException("Không thể xóa trạng thái này vì đang có công việc sử dụng nó!");
 
-        //check thêm bảng BoardColumnStatus
-        // hoặc IssueTransition xem có cấu hình nào đang xài status này không.
-
+        // FK giữ board mapping, workflow và lịch sử chuyển trạng thái. Vi phạm được trả về 409.
         issueStatusRepository.deleteById(id);
     }
 }

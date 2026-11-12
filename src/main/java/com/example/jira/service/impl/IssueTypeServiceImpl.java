@@ -1,22 +1,16 @@
 package com.example.jira.service.impl;
 
-import com.example.jira.dto.issue.CreateIssueRequest;
-import com.example.jira.dto.issue.UpdateIssueRequest;
 import com.example.jira.dto.issue.issue_type.IssueTypeRequest;
 import com.example.jira.dto.issue.issue_type.IssueTypeResponse;
 import com.example.jira.entity.IssueType;
-import com.example.jira.enums.PermissionName;
 import com.example.jira.mapper.IssueTypeMapper;
 import com.example.jira.repository.IssueRepository;
 import com.example.jira.repository.IssueTypeRepository;
 import com.example.jira.repository.ProjectIssueTypeRepository;
 import com.example.jira.security.GlobalSecurity;
-import com.example.jira.security.ProjectSecurity;
 import com.example.jira.service.IssueTypeService;
-import com.example.jira.ultils.SecurityUtils;
 import com.example.jira.exception.NotFoundException;
 import com.example.jira.exception.ConflictException;
-import org.springframework.security.access.AccessDeniedException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -39,10 +33,9 @@ public class IssueTypeServiceImpl implements IssueTypeService {
     public IssueTypeResponse createIssueType(IssueTypeRequest request){
         // Chặn user thường trước khi tra ID mục tiêu; biết ID role/quyền không cho phép tự nâng quyền.
         globalSecurity.assertSystemAdmin();
-        int userId = SecurityUtils.getCurrentUserId();
 
         IssueType type = new IssueType();
-        type.setTypeName(request.getTypeName());
+        type.setTypeName(request.getTypeName().trim());
 
         return IssueTypeMapper.toResponse(issueTypeRepository.save(type));
     }
@@ -57,7 +50,7 @@ public class IssueTypeServiceImpl implements IssueTypeService {
         globalSecurity.assertSystemAdmin();
         IssueType issueType = issueTypeRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy Issue Type"));
-        issueType.setTypeName(request.getTypeName());
+        issueType.setTypeName(request.getTypeName().trim());
 
         return IssueTypeMapper.toResponse(issueTypeRepository.save(issueType));
     }
@@ -78,6 +71,7 @@ public class IssueTypeServiceImpl implements IssueTypeService {
         if (hasIssues) {
             throw new ConflictException("Không thể xóa vì đã có Task được tạo với Issue Type này.");
         }
+        if (!issueTypeRepository.existsById(issueTypeId)) throw new NotFoundException("Không tìm thấy Issue Type");
         issueTypeRepository.deleteById(issueTypeId);
 
     }

@@ -31,7 +31,7 @@ public class IssueTypeController {
 
     @PutMapping("/{id}")
 //    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<IssueTypeResponse> updateIssueType(@PathVariable int id, @RequestBody IssueTypeRequest request) {
+    public ResponseEntity<IssueTypeResponse> updateIssueType(@PathVariable int id, @RequestBody @Valid IssueTypeRequest request) {
         return ResponseEntity.ok(issueTypeService.updateIssueType(id, request));
     }
 

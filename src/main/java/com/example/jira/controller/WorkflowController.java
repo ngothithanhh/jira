@@ -4,6 +4,7 @@ import com.example.jira.dto.issue.issue_status.IssueStatusResponse;
 import com.example.jira.dto.workflow.WorkflowRuleRequest;
 import com.example.jira.dto.workflow.WorkflowRuleResponse;
 import com.example.jira.service.WorkflowRuleService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -24,7 +25,7 @@ public class WorkflowController {
     }
 
     @PostMapping("/rules")
-    public ResponseEntity<WorkflowRuleResponse> createRule(@RequestBody WorkflowRuleRequest request) {
+    public ResponseEntity<WorkflowRuleResponse> createRule(@Valid @RequestBody WorkflowRuleRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(workflowRuleService.createRule(request));
     }
 

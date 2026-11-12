@@ -162,7 +162,11 @@ class ConfigurationRegressionTest {
             assertThatThrownBy(() -> service.deleteIssueType(7)).hasMessageContaining("Task"); verify(types, never()).deleteById(anyInt());
         }
         // Loại không còn tham chiếu được xóa đúng ID.
-        @Test void unusedTypeCanBeDeleted() { service.deleteIssueType(7); verify(types).deleteById(7); }
+        @Test void unusedTypeCanBeDeleted() {
+            when(types.existsById(7)).thenReturn(true);
+            service.deleteIssueType(7);
+            verify(types).deleteById(7);
+        }
         // Tạo issue type giữ tên và kiểm tra DTO trả về.
         @Test void createTypePreservesName() {
             when(types.save(any())).thenAnswer(i -> i.getArgument(0));
@@ -195,8 +199,20 @@ class ConfigurationRegressionTest {
         }
         // Trạng thái đang có issue dùng không được xóa.
         @Test void usedStatusCannotBeDeleted() {
+            when(statuses.findByIdForUpdate(3)).thenReturn(Optional.of(Fixtures.status(3, "Done", StatusCategory.DONE)));
             when(issues.existsByStatus_StatusId(3)).thenReturn(true);
             assertThatThrownBy(() -> service.deleteStatus(3)).hasMessageContaining("sử dụng"); verify(statuses, never()).deleteById(anyInt());
+        }
+        @Test void categoryChangeOfUsedStatusIsRejected() {
+            var status = Fixtures.status(3, "Done", StatusCategory.DONE);
+            when(statuses.findByIdForUpdate(3)).thenReturn(Optional.of(status));
+            when(issues.existsByStatus_StatusId(3)).thenReturn(true);
+            var request = new IssueStatusRequest();
+            request.setStatusName("Doing");
+            request.setStatusCategory(StatusCategory.IN_PROGRESS);
+            assertThatThrownBy(() -> service.updateStatus(3, request)).hasMessageContaining("đổi nhóm");
+            assertThat(status.getStatusCategory()).isEqualTo(StatusCategory.DONE);
+            verify(statuses, never()).save(any());
         }
         // Cập nhật trạng thái không tồn tại không được tạo mới.
         @Test void missingStatusUpdateIsRejected() {
@@ -212,13 +228,13 @@ class ConfigurationRegressionTest {
         @InjectMocks WorkflowRuleServiceImpl service;
         // Workflow trùng cặp nguồn/đích phải bị từ chối.
         @Test void duplicateTransitionRuleIsRejected() {
+            prepareStatuses();
             when(rules.existsByFromStatus_StatusIdAndToStatus_StatusId(1, 2)).thenReturn(true);
             var r = request(); assertThatThrownBy(() -> service.createRule(r)).hasMessageContaining("tồn tại"); verify(rules, never()).save(any());
         }
         // Tạo rule gắn đúng from và to, không đảo hai ID.
         @Test void rulePreservesDirection() {
-            when(statuses.findById(1)).thenReturn(Optional.of(Fixtures.status(1, "To Do", StatusCategory.TO_DO)));
-            when(statuses.findById(2)).thenReturn(Optional.of(Fixtures.status(2, "Doing", StatusCategory.IN_PROGRESS)));
+            prepareStatuses();
             when(rules.save(any())).thenAnswer(i -> i.getArgument(0)); service.createRule(request());
             verify(rules).save(argThat(r -> r.getFromStatus().getStatusId() == 1 && r.getToStatus().getStatusId() == 2));
         }
@@ -236,6 +252,10 @@ class ConfigurationRegressionTest {
             assertThat(service.getAllowedNextStatuses(1)).isEmpty(); verify(rules).findByFromStatus_StatusId(1);
         }
         private WorkflowRuleRequest request() { var r = new WorkflowRuleRequest(); r.setFromStatusId(1); r.setToStatusId(2); return r; }
+        private void prepareStatuses() {
+            when(statuses.findByIdForUpdate(1)).thenReturn(Optional.of(Fixtures.status(1, "To Do", StatusCategory.TO_DO)));
+            when(statuses.findByIdForUpdate(2)).thenReturn(Optional.of(Fixtures.status(2, "Doing", StatusCategory.IN_PROGRESS)));
+        }
     }
     @Nested @ExtendWith(MockitoExtension.class)
     class ProjectTypes {
@@ -245,6 +265,9 @@ class ConfigurationRegressionTest {
         @Mock IssueRepository issues;
         @Mock IssueTypeRepository types;
         @InjectMocks ProjectIssueTypeServiceImpl service;
+        @org.junit.jupiter.api.BeforeEach void projectLock() {
+            when(projects.findByIdForUpdate(10)).thenReturn(Optional.of(Fixtures.project(10)));
+        }
         // Loại có issue dùng trong đúng project thì không gỡ cấu hình.
         @Test void usedTypeCannotBeUnassigned() {
             when(issues.existsByProject_ProjectIdAndIssueType_IssueTypeId(10, 7)).thenReturn(true);
@@ -268,9 +291,17 @@ class ConfigurationRegressionTest {
         }
         // Gán loại tạo khóa ghép project/type, không nhầm loại ở dự án khác.
         @Test void assignStoresScopedCompositeId() {
-            when(projects.findById(10)).thenReturn(Optional.of(Fixtures.project(10)));
             var t = new IssueType(); t.setIssueTypeId(7); when(types.findById(7)).thenReturn(Optional.of(t));
             service.assignIssueType(10, 7, false); verify(links).save(argThat(l -> l.getId().equals(new ProjectIssueTypeId(10, 7))));
+        }
+        @Test void assignDefaultClearsPreviousDefault() {
+            var old = link(8, true);
+            when(links.findByProject_ProjectId(10)).thenReturn(List.of(old));
+            var type = new IssueType(); type.setIssueTypeId(7);
+            when(types.findById(7)).thenReturn(Optional.of(type));
+            service.assignIssueType(10, 7, true);
+            assertThat(old.isDefault()).isFalse();
+            verify(links).save(argThat(ProjectIssueType::isDefault));
         }
         private ProjectIssueType link(int typeId, boolean defaultType) {
             var t = new IssueType(); t.setIssueTypeId(typeId);

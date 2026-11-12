@@ -476,6 +476,14 @@ class ApiRegressionTest {
         mvc.perform(get("/api/sprints/100").header("Authorization", bearer())).andExpect(status().isOk()); verify(sprints).getSprint(100);
     }
     // Dùng parser và JWT filter thật; chỉ mock phần tra user của ứng dụng.
+    @Test void invalidConfigurationRequestReturnsBadRequestWithoutWriting() throws Exception {
+        mvc.perform(post("/api/issue-types").header("Authorization", bearer()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"typeName\":\"   \"}")).andExpect(status().isBadRequest());
+        mvc.perform(post("/api/issue-statuses").header("Authorization", bearer()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"statusName\":\"Sai\",\"statusCategory\":\"OTHER\"}")).andExpect(status().isBadRequest());
+        verifyNoInteractions(types, statuses);
+    }
+
     private String bearer() {
         when(details.loadUserByUsername("user1@test.invalid")).thenReturn(UserPrincipal.fromUser(Fixtures.user(1)));
         return "Bearer " + jwt.generateToken("user1@test.invalid");
