@@ -50,7 +50,7 @@ class AuthRegressionTest {
         @Test void duplicateEmailDoesNotWrite() {
             var req = new RegisterRequestDTO(); req.setEmail("existing@test.invalid");
             when(users.existsByEmail(req.getEmail())).thenReturn(true);
-            assertThatThrownBy(() -> service.register(req)).isInstanceOf(RuntimeException.class);
+            assertThatThrownBy(() -> service.register(req)).isInstanceOf(com.example.jira.exception.ConflictException.class);
             verify(users, never()).save(any()); verifyNoInteractions(tokens, jwt);
         }
         // Sai mật khẩu dừng ở AuthenticationManager, không cấp phiên làm việc.

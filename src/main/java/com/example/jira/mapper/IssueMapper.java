@@ -29,6 +29,9 @@ public class IssueMapper {
                 
                 .statusName(issue.getStatus() != null ? issue.getStatus().getStatusName() : null)
                 .issueTypeName(issue.getIssueType() != null ? issue.getIssueType().getTypeName() : null)
+                // Giữ ID nullable của từng bảng cấu hình, không dùng tên hay số thứ tự thay ID.
+                .statusId(issue.getStatus() != null ? issue.getStatus().getStatusId() : null)
+                .issueTypeId(issue.getIssueType() != null ? issue.getIssueType().getIssueTypeId() : null)
 
                 .projectId(issue.getProject() != null ? issue.getProject().getProjectId() : 0)
                 .projectKey(issue.getProject() != null ? issue.getProject().getProjectKey() : null)

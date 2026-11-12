@@ -62,9 +62,18 @@ class MapperRegressionTest {
     // Issue đủ quan hệ phải trả đúng ID, story point và tên trạng thái.
     @Test void issueResponsePreservesIdentityAndEstimate() {
         var i = Fixtures.issue(5, 10); i.setStoryPoints(8);
+        var type = new IssueType(); type.setIssueTypeId(23); type.setTypeName("Cùng tên có thể đổi"); i.setIssueType(type);
         var response = IssueMapper.toResponse(i);
         assertThat(response.getIssueId()).isEqualTo(5); assertThat(response.getProjectId()).isEqualTo(10);
         assertThat(response.getAssigneeId()).isEqualTo(2); assertThat(response.getReporterId()).isEqualTo(3);
         assertThat(response.getStoryPoints()).isEqualTo(8); assertThat(response.getStatusName()).isEqualTo("To Do");
+        assertThat(response.getStatusId()).isEqualTo(1); assertThat(response.getIssueTypeId()).isEqualTo(23);
+    }
+
+    // Quan hệ thiếu giữ null; không cấp ID giả làm UI cập nhật nhầm bản ghi cấu hình.
+    @Test void issueConfigurationIdsRemainNullable() {
+        var i = Fixtures.issue(5, 10); i.setStatus(null); i.setIssueType(null);
+        var response = IssueMapper.toResponse(i);
+        assertThat(response.getStatusId()).isNull(); assertThat(response.getIssueTypeId()).isNull();
     }
 }

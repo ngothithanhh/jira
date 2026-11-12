@@ -23,6 +23,9 @@ public class IssueResponse {
     
     private String statusName;
     private String issueTypeName;
+    // ID quan hệ thật để FE sửa issue; không suy ID từ tên có thể đổi hoặc trùng nhau.
+    private Integer statusId;
+    private Integer issueTypeId;
 
     private int projectId;
     private String projectKey;

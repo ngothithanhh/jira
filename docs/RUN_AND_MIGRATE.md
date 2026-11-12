@@ -19,7 +19,16 @@ Chưa chạy các script này trên DB triển khai trong đợt hoàn thiện c
 
 ## DB mới hoàn toàn
 
-Repo gốc chưa có baseline SQL đầy đủ cho các bảng cũ. Trên DB mới/rỗng đã xác nhận đúng đích, có thể khởi tạo lần đầu bằng Hibernate update (DB_DDL_MODE=update với file mẫu), sau đó dừng app, chạy 001..006 để bổ sung index/default và chuyển về validate. Không dùng create/create-drop trên DB có dữ liệu.
+Đợt nối FE ngày 12/11/2026 bổ sung `scripts/migrations/000_baseline.sql` và `scripts/migrate.ps1`. Baseline chứa schema đầy đủ, không có user/password/dữ liệu demo. Với DB mới đã tạo và xác nhận rỗng:
+
+```powershell
+# Password do PGPASSWORD hoặc pgpass cung cấp; không ghi mật khẩu vào command/log.
+.\scripts\migrate.ps1 -Database jira_demo -HostName 127.0.0.1 -Port 5432 -UserName postgres
+```
+
+Script giữ advisory lock trên cùng kết nối psql, kiểm SHA256 (chuẩn hóa UTF-8/LF để checkout Windows/Linux khớp nhau) và ghi mỗi migration cùng ledger trong transaction. Chạy lại thì bỏ qua file đã áp dụng đúng checksum; file đổi checksum thì dừng. Không tự tiếp quản DB có bảng nhưng thiếu `public.schema_migrations`: phải đối chiếu schema legacy riêng trước khi ghi nhận baseline. Quy trình DB cũ ở trên vẫn cần backup và kiểm schema; không đánh dấu baseline đại trà.
+
+Sau migration chạy backend với `spring.jpa.hibernate.ddl-auto=validate`, không dùng Hibernate update để bootstrap cài mới nữa. Nếu có sai khác thì dừng, không dùng create/create-drop để sửa DB có dữ liệu. Đã thực thi fresh/repeat trên PostgreSQL 18.6; đã bỏ SET transaction_timeout phụ thuộc PG17+ khỏi baseline. Chưa kiểm thực thi trên PostgreSQL16; đường dẫn psql mặc định của script theo PG18 trên máy này và có thể truyền PgBin.
 
 Seeder hiện có tạo role/permission và tài khoản khởi tạo theo logic repo. Sau khi bootstrap, dùng chức năng đổi mật khẩu/quản lý admin; cấu hình seeder vẫn theo mã gốc. Tài liệu này không đưa credential khởi tạo vào log hoặc file mẫu.
 

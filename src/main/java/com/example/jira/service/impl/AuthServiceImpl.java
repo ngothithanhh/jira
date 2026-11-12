@@ -49,12 +49,14 @@ public class AuthServiceImpl implements AuthService {
         return new AuthResponseDTO(token, refreshToken.getTokenValue());
     }
 
+    /** Đăng ký tạo users và refresh_tokens trong cùng transaction; email đã dùng trả 409 trước khi ghi. */
     @Override
     @org.springframework.transaction.annotation.Transactional
     public AuthResponseDTO register(RegisterRequestDTO request){
 
+        // Trùng email là xung đột dữ liệu người dùng có thể sửa, không phải lỗi máy chủ 500.
         if(userRepository.existsByEmail(request.getEmail())){
-            throw new RuntimeException("Email đã tồn tại!");
+            throw new com.example.jira.exception.ConflictException("Email đã tồn tại!");
         }
 
         User user = new User();
