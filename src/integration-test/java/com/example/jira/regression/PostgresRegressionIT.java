@@ -146,6 +146,7 @@ class PostgresRegressionIT {
     @Autowired UserRoleRepository roleRows;
     @Autowired UserRoleAssignmentRepository roleAssignments;
     @Autowired ProjectMemberRepository members;
+    @Autowired RolePermissionRepository permissionLinks;
     @Autowired PasswordEncoder encoder;
     @Autowired JwtUtil jwt;
     @Autowired IssueCommentServiceImpl commentService;
@@ -781,6 +782,49 @@ class PostgresRegressionIT {
         assertThat(members.countOtherProjectManagers(projectId,-1)).isEqualTo(1); assertThat(roleAssignments.count()).isZero();
         assertThat(jdbc.queryForObject("select count(*) from project_members where assigned_at='2026-01-01 00:00:00'",Integer.class)).isEqualTo(2);
     }
+    /**
+     * Mô phỏng EntityManager đã đọc quyền như controller/OEIV: role cũ đang managed.
+     * Transaction độc lập thu hồi quyền trước khi service lấy khóa; kiểm lại phải thấy role mới và từ chối.
+     * Không mock ProjectSecurity trong case này; dùng PostgreSQL thật và cùng persistence context cho precheck/service.
+     */
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"add","role","remove"})
+    void memberWriteRejectsRevokedRoleAlreadyLoadedInPersistenceContext(String operation) {
+        var oldRole=roleRows.saveAndFlush(Fixtures.role(0,"PROJECT_MANAGER"));
+        var newRole=roleRows.saveAndFlush(Fixtures.role(0,"DEVELOPER"));
+        for(String name:List.of("ADD_MEMBER","DELETE_MEMBER")) {
+            int permissionId=jdbc.queryForObject("insert into permissions(permission_name) values (?) returning permission_id",Integer.class,name);
+            jdbc.update("insert into role_permissions(role_id,permission_id) values (?,?)",oldRole.getRoleId(),permissionId);
+        }
+        project.setLead(null);project=projects.saveAndFlush(project);
+        ProjectMember actor=new ProjectMember();actor.setId(new ProjectMemberId(project.getProjectId(),caller.getUserId()));actor.setProject(project);actor.setUser(caller);actor.setRole(oldRole);members.saveAndFlush(actor);
+        var target=Fixtures.user(0);target.setEmail("member-revoked-target@test.invalid");target=users.saveAndFlush(target);
+        int targetId=target.getUserId(), projectId=project.getProjectId(), actorId=caller.getUserId();
+        if(!operation.equals("add")) {
+            var member=new ProjectMember();member.setId(new ProjectMemberId(projectId,targetId));member.setProject(project);member.setUser(target);member.setRole(newRole);members.saveAndFlush(member);
+        }
+        var realSecurity=new ProjectSecurity(members,permissionLinks,projects,new com.example.jira.security.GlobalSecurity(roleAssignments,permissionLinks));
+        Object serviceTarget=AopTestUtils.getUltimateTargetObject(memberService);
+        ReflectionTestUtils.setField(serviceTarget,"projectSecurity",realSecurity);
+        try {
+            new TransactionTemplate(manager).execute(outer -> {
+                assertThat(realSecurity.hasPermission(projectId,PermissionName.ADD_MEMBER)).isTrue();
+                var otherTransaction=new TransactionTemplate(manager);
+                otherTransaction.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+                otherTransaction.execute(status->{jdbc.update("update project_members set role_id=? where project_id=? and user_id=?",newRole.getRoleId(),projectId,actorId);return null;});
+                assertThatThrownBy(()->{
+                    if(operation.equals("add")){var body=new com.example.jira.dto.project.AddMemberRequest();body.setUserId(targetId);body.setRoleId(newRole.getRoleId());memberService.addMember(projectId,body);}
+                    else if(operation.equals("role"))memberService.updateRole(projectId,targetId,newRole.getRoleId());
+                    else memberService.removeMember(projectId,targetId);
+                }).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+                // Service bị từ chối đánh dấu transaction chung rollback-only; test chủ động rollback thay vì commit nó.
+                outer.setRollbackOnly();
+                return true;
+            });
+            assertThat(jdbc.queryForObject("select count(*) from audit_logs",Integer.class)).isZero();
+        } finally {ReflectionTestUtils.setField(serviceTarget,"projectSecurity",security);}
+    }
+
     // Member/audit chưa được commit nếu notification giữa bước bị lỗi.
     @Test void failedInvitationRollsBackMemberAndAudit() {
         var target=Fixtures.user(0); target.setEmail("invited@test.invalid"); target=users.saveAndFlush(target); var role=roleRows.saveAndFlush(Fixtures.role(0,"DEVELOPER"));

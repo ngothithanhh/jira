@@ -110,6 +110,8 @@ class ProjectRegressionTest {
         @Mock jakarta.persistence.EntityManager entityManager;
         @BeforeEach void projectLock() {
             lenient().when(projects.findByIdForUpdate(10)).thenReturn(Optional.of(Fixtures.project(10)));
+            // Actor1 khác member đích2; khai báo rõ lượt đọc actor mới để strict mock không nhầm với stub đích.
+            lenient().when(members.findByProject_ProjectIdAndUser_UserId(10,1)).thenReturn(Optional.empty());
         }
         @Mock ProjectRepository projects;
         @Mock UserRepository users;
@@ -136,7 +138,18 @@ class ProjectRegressionTest {
         // Thiếu ADD_MEMBER dừng trước khi đọc user và role.
         @Test void deniedAddDoesNotReadOrWriteMember() {
             assertThatThrownBy(() -> service.addMember(10, new AddMemberRequest())).hasMessageContaining("quyền");
-            verifyNoInteractions(members, users, roles, notifications);
+            verify(members).findByProject_ProjectIdAndUser_UserId(10,1);
+            verify(members,never()).save(any());verifyNoInteractions(users,roles,notifications);
+        }
+        @Test void actorMembershipRefreshesAfterLockBeforePermissionCheck() {
+            var actor=new ProjectMember();
+            when(members.findByProject_ProjectIdAndUser_UserId(10,1)).thenReturn(Optional.of(actor));
+            assertThatThrownBy(()->service.addMember(10,new AddMemberRequest())).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+            var order=inOrder(projects,entityManager,members,security);
+            order.verify(projects).findByIdForUpdate(10);order.verify(entityManager).refresh(any(Project.class));
+            order.verify(members).findByProject_ProjectIdAndUser_UserId(10,1);order.verify(entityManager).refresh(actor);
+            order.verify(security).hasPermission(10,PermissionName.ADD_MEMBER);
+            verifyNoInteractions(users,roles,notifications,audit);
         }
         // Thêm thành viên gắn đúng user/role/project, thông báo gửi tới user được thêm.
         @Test void addPersistsMembershipAndNotifiesNewMember() {
@@ -161,18 +174,25 @@ class ProjectRegressionTest {
         // Gỡ thành viên chỉ xóa cặp project/user được yêu cầu.
         @Test void removeUsesCompositeIdAndRecordsAudit() {
             when(security.hasPermission(10, PermissionName.DELETE_MEMBER)).thenReturn(true);
+            when(members.existsById(new ProjectMemberId(10, 2))).thenReturn(true);
             service.removeMember(10, 2); verify(members).deleteById(new ProjectMemberId(10, 2));
             verify(audit).logAction(eq("REMOVE_MEMBER"), eq(EntityType.PROJECT), eq(10), contains("2"));
         }
+        @Test void missingMembershipDoesNotProduceAudit() {
+            when(security.hasPermission(10, PermissionName.DELETE_MEMBER)).thenReturn(true);
+            assertThatThrownBy(() -> service.removeMember(10, 2)).isInstanceOf(com.example.jira.exception.NotFoundException.class);
+            verify(members, never()).deleteById(any());
+            verifyNoInteractions(audit);
+        }
         // BUG-008: người ngoài không được đọc danh sách thành viên dự án.
         @Test void outsiderCannotListMembers() {
+            when(projects.existsById(10)).thenReturn(true);
             assertThatThrownBy(() -> service.getMembers(10)).isInstanceOf(RuntimeException.class);
             verifyNoInteractions(members);
         }
         // Cấu hình dữ liệu đọc của addMember; chưa ghi DB thật ở unit test.
         private void prepareAdd(String role) {
             when(security.hasPermission(10, PermissionName.ADD_MEMBER)).thenReturn(true);
-            when(projects.findById(10)).thenReturn(Optional.of(Fixtures.project(10)));
             when(users.findById(2)).thenReturn(Optional.of(Fixtures.user(2)));
             when(roles.findByRoleId(7)).thenReturn(Optional.of(Fixtures.role(7, role)));
         }

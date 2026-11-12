@@ -114,6 +114,7 @@ class ApiRegressionTest {
         mvc.perform(put("/api/admin/users/2/roles/7").header("Authorization",bearer())).andExpect(status().isNoContent());
         mvc.perform(delete("/api/admin/users/2/roles/7").header("Authorization",bearer())).andExpect(status().isNoContent());
         mvc.perform(patch("/api/admin/users/2/enabled").header("Authorization",bearer()).contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":false}")).andExpect(status().isNoContent());
+        allowMemberWrite(10);
         mvc.perform(put("/api/projects/10/members/2/role").header("Authorization",bearer()).contentType(MediaType.APPLICATION_JSON).content("{\"roleId\":7}")).andExpect(status().isNoContent());
         verify(accounts).profile(argThat(body -> "Display".equals(body.fullName()))); verify(accounts).password(any());
         verify(accounts).roles(2); verify(accounts).grantRole(2,7); verify(accounts).revokeRole(2,7); verify(accounts).enabled(2,false); verify(members).updateRole(10,2,7);
@@ -421,13 +422,29 @@ class ApiRegressionTest {
     // Dùng parser và JWT filter thật; chỉ mock phần tra user của ứng dụng.
     // Route thêm/gỡ thành viên giữ tách biệt ID người gọi và ID thành viên đích.
     @Test void memberMutationRoutesUseCorrectParticipants() throws Exception {
-        when(auth.getCurrentUser()).thenReturn(new com.example.jira.dto.user.UserSummary(1, "user1@test.invalid", "user1"));
-        when(permissions.checkPermission(eq(1), anyString(), eq(10))).thenReturn(true);
+        allowMemberWrite(10);
         mvc.perform(post("/api/projects/10/members").header("Authorization", bearer()).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"userId\":2,\"roleId\":7}")) .andExpect(status().isOk());
         verify(members).addMember(eq(10), argThat(r -> r.getUserId() == 2 && r.getRoleId() == 7));
         mvc.perform(delete("/api/projects/10/members/2").header("Authorization", bearer())).andExpect(status().isOk());
         verify(members).removeMember(10, 2);
+    }
+
+    @Test void memberCandidateSearchAcceptsOneEmailAndRejectsInvalidInput() throws Exception {
+        var result = new com.example.jira.dto.project.MemberCandidate(2, "user2", null);
+        when(members.findCandidate(10, "user2@test.invalid")).thenReturn(java.util.List.of(result));
+        mvc.perform(post("/api/projects/10/members/candidates/search").header("Authorization", bearer())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"email\":\" user2@test.invalid \"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].userId").value(2)).andExpect(jsonPath("$[0].email").doesNotExist());
+        mvc.perform(post("/api/projects/10/members/candidates/search").header("Authorization", bearer())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"email\":\"user2\"}")).andExpect(status().isBadRequest());
+        verify(members).findCandidate(10, "user2@test.invalid");
+        verifyNoMoreInteractions(members);
+    }
+
+    private void allowMemberWrite(int projectId) {
+        when(auth.getCurrentUser()).thenReturn(new com.example.jira.dto.user.UserSummary(1, "user1@test.invalid", "user1"));
+        when(permissions.checkPermission(eq(1), anyString(), eq(projectId))).thenReturn(true);
     }
     // Multipart giữ nội dung file và issue ID, không lẫn với attachment ID.
     @Test void multipartUploadBindsFileToIssue() throws Exception {
